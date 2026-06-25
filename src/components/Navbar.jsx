@@ -7,6 +7,7 @@ export default function Navbar() {
   const { user, profile, signOut } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [artistOpen, setArtistOpen] = useState(false)
 
   async function handleSignOut() {
     await signOut()
@@ -14,7 +15,13 @@ export default function Navbar() {
     setOpen(false)
   }
 
-  function close() { setOpen(false) }
+  function close() {
+    setOpen(false)
+    setArtistOpen(false)
+  }
+
+  const isArtist = profile?.role === 'artist'
+  const isAdmin  = profile?.role === 'admin'
 
   return (
     <nav className="navbar">
@@ -24,21 +31,50 @@ export default function Navbar() {
       </Link>
 
       <div className={`navbar-links ${open ? 'open' : ''}`}>
-        <NavLink to="/songs" onClick={close}>Songs</NavLink>
-        <NavLink to="/videos" onClick={close}>Videos</NavLink>
+        {/* Public links */}
+        <NavLink to="/songs"       onClick={close}>Songs</NavLink>
+        <NavLink to="/videos"      onClick={close}>Videos</NavLink>
         <NavLink to="/leaderboard" onClick={close}>Leaderboard</NavLink>
-        <NavLink to="/contests" onClick={close}>Contests</NavLink>
+        <NavLink to="/contests"    onClick={close}>Contests</NavLink>
 
         {user ? (
           <>
             <div className="nav-divider" />
+
             <NavLink to="/dashboard" onClick={close}>Dashboard</NavLink>
-            {profile?.role === 'artist' && (
-              <NavLink to="/artist-dashboard" onClick={close}>Artist Hub</NavLink>
+
+            {/* Artist section */}
+            {(isArtist || isAdmin) && (
+              <div className="nav-dropdown-wrap">
+                <button
+                  className={`nav-dropdown-trigger ${artistOpen ? 'active' : ''}`}
+                  onClick={() => setArtistOpen(v => !v)}
+                >
+                  🎤 Artist <span className="nav-caret">▾</span>
+                </button>
+                {artistOpen && (
+                  <div className="nav-dropdown">
+                    <NavLink to="/artist-dashboard" onClick={close}>
+                      📊 Artist Dashboard
+                    </NavLink>
+                    <NavLink to="/upload/song" onClick={close}>
+                      🎵 Upload Song
+                    </NavLink>
+                    <NavLink to="/upload/video" onClick={close}>
+                      🎬 Upload Video
+                    </NavLink>
+                  </div>
+                )}
+              </div>
             )}
-            {profile?.role === 'admin' && (
-              <NavLink to="/admin" onClick={close}>Admin</NavLink>
+
+            {/* Admin link */}
+            {isAdmin && (
+              <NavLink to="/admin" onClick={close} className="nav-admin-link">
+                ⚙️ Admin
+              </NavLink>
             )}
+
             <NavLink to="/profile" onClick={close}>Profile</NavLink>
             <button className="btn btn-outline btn-sm" onClick={handleSignOut}>Log out</button>
           </>
@@ -53,7 +89,7 @@ export default function Navbar() {
 
       <button
         className={`navbar-toggle ${open ? 'active' : ''}`}
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen(v => !v)}
         aria-label="Toggle menu"
       >
         <span /><span /><span />
