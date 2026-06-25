@@ -15,12 +15,36 @@ export default function UploadSongPage() {
   const [genres, setGenres] = useState([])
   const [form, setForm] = useState({ title: '', description: '', genre_id: '', price: '' })
   const [audioFile, setAudioFile] = useState(null)
+  const [audioError, setAudioError] = useState('')
   const [coverFile, setCoverFile] = useState(null)
   const [coverPreview, setCoverPreview] = useState(null)
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
   const [success, setSuccess] = useState(false)
+
+  // Validate by extension — iOS/Safari often reports audio files as
+  // application/octet-stream, so MIME-type checks alone will reject them.
+  const ACCEPTED_AUDIO_EXTS = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac', 'mp4', 'aiff', 'aif', 'caf', 'opus', 'weba']
+
+  function isValidAudioFile(file) {
+    if (!file) return false
+    if (file.type.startsWith('audio/')) return true
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+    return ACCEPTED_AUDIO_EXTS.includes(ext)
+  }
+
+  function handleAudioChange(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    if (!isValidAudioFile(file)) {
+      setAudioError('Unsupported format. Please use MP3, M4A, WAV, AAC, OGG, or FLAC.')
+      setAudioFile(null)
+      return
+    }
+    setAudioError('')
+    setAudioFile(file)
+  }
 
   useEffect(() => {
     supabase.from('genres').select('id, name').then(({ data }) => {
@@ -108,7 +132,7 @@ export default function UploadSongPage() {
             Your song has been submitted for review. You'll see it in your Artist Hub once approved.
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-            <button className="btn btn-primary" onClick={() => { setSuccess(false); setForm({ title: '', description: '', genre_id: '', price: '' }); setAudioFile(null); setCoverFile(null); setCoverPreview(null) }}>
+            <button className="btn btn-primary" onClick={() => { setSuccess(false); setForm({ title: '', description: '', genre_id: '', price: '' }); setAudioFile(null); setAudioError(''); setCoverFile(null); setCoverPreview(null) }}>
               Upload another
             </button>
             <button className="btn btn-outline" onClick={() => navigate('/artist-dashboard')}>
@@ -204,19 +228,35 @@ export default function UploadSongPage() {
               {audioFile ? (
                 <div>
                   <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>✅</div>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--success)' }}>{audioFile.name}</p>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{(audioFile.size / 1024 / 1024).toFixed(1)} MB — click to change</p>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--success)', wordBreak: 'break-all' }}>{audioFile.name}</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    {(audioFile.size / 1024 / 1024).toFixed(1)} MB — tap to change
+                  </p>
                 </div>
               ) : (
                 <>
                   <div style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>🎵</div>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Click to upload audio file</p>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>MP3, WAV, AAC, FLAC</p>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Tap or click to select audio file</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    MP3 · M4A · WAV · AAC · OGG · FLAC
+                  </p>
                 </>
               )}
-              <input id="audio-input" type="file" accept="audio/*" style={{ display: 'none' }}
-                onChange={e => setAudioFile(e.target.files[0] || null)} />
+              {/* Combined accept: audio/* covers most browsers; explicit extensions
+                  unblock iOS/Safari which grays files it can't match to audio/* alone */}
+              <input
+                id="audio-input"
+                type="file"
+                accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac,.aiff,.aif,.opus,.caf"
+                style={{ display: 'none' }}
+                onChange={handleAudioChange}
+              />
             </div>
+            {audioError && (
+              <p style={{ marginTop: '0.5rem', fontSize: '0.8125rem', color: 'var(--error)' }}>
+                ⚠️ {audioError} Accepted formats: MP3, M4A, WAV, AAC, OGG, FLAC, AIFF.
+              </p>
+            )}
           </div>
 
           <div className="alert alert-info" style={{ marginBottom: '1.25rem' }}>
