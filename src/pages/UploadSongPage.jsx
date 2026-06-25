@@ -81,7 +81,9 @@ export default function UploadSongPage() {
         status: 'pending',
         play_count: 0,
       }
-      if (form.genre_id) songRow.genre_id = form.genre_id
+      // Only include genre_id when it came from the real DB (genres array populated).
+      // Fallback genres use fake numeric IDs that would violate the UUID FK constraint.
+      if (form.genre_id && genres.length > 0) songRow.genre_id = form.genre_id
       if (form.price) songRow.price = parseFloat(form.price)
 
       const { error: insertError } = await supabase.from('songs').insert(songRow)
