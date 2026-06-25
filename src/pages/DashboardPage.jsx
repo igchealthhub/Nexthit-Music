@@ -13,8 +13,8 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       const [s, v, c] = await Promise.all([
-        supabase.from('songs').select('*').eq('status', 'published').order('created_at', { ascending: false }).limit(6),
-        supabase.from('videos').select('*').eq('status', 'published').order('created_at', { ascending: false }).limit(3),
+        supabase.from('songs').select('*, genres(name)').eq('status', 'approved').order('created_at', { ascending: false }).limit(6),
+        supabase.from('videos').select('*').eq('status', 'approved').order('created_at', { ascending: false }).limit(3),
         supabase.from('contests').select('*').eq('status', 'active').limit(3),
       ])
       setSongs(s.data || [])

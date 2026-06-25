@@ -1,77 +1,233 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
+const FALLBACK_GENRES = [
+  'Pop', 'Hip-Hop', 'R&B', 'Rock', 'Electronic', 'Jazz',
+  'Country', 'Soul', 'Afrobeats', 'Reggae', 'Latin', 'Classical', 'Other',
+]
+
 export default function UploadSongPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ title: '', description: '', audio_url: '', cover_url: '', status: 'published' })
+
+  const [genres, setGenres] = useState([])
+  const [form, setForm] = useState({ title: '', description: '', genre_id: '', price: '' })
+  const [audioFile, setAudioFile] = useState(null)
+  const [coverFile, setCoverFile] = useState(null)
+  const [coverPreview, setCoverPreview] = useState(null)
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState('')
+  const [success, setSuccess] = useState(false)
+
+  useEffect(() => {
+    supabase.from('genres').select('id, name').then(({ data }) => {
+      if (data?.length) setGenres(data)
+    })
+  }, [])
+
+  function handleCoverChange(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setCoverFile(file)
+    setCoverPreview(URL.createObjectURL(file))
+  }
+
+  async function uploadFile(bucket, path, file) {
+    const { error } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+    })
+    if (error) throw new Error(`Storage upload failed (${bucket}): ${error.message}`)
+    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path)
+    return publicUrl
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    if (!form.title.trim()) { setError('Title is required.'); return }
-    setLoading(true)
-    const { error } = await supabase.from('songs').insert({
-      artist_id: user.id,
-      title: form.title,
-      description: form.description,
-      audio_url: form.audio_url,
-      cover_url: form.cover_url,
-      status: form.status,
-      play_count: 0,
-    })
-    setLoading(false)
-    if (error) { setError(error.message); return }
-    navigate('/artist-dashboard')
+    if (!form.title.trim()) { setError('Song title is required.'); return }
+    if (!audioFile) { setError('Please select an audio file.'); return }
+
+    setUploading(true)
+
+    try {
+      const timestamp = Date.now()
+      const safeTitle = form.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()
+
+      // Upload audio
+      setProgress('Uploading audio…')
+      const audioPath = `${user.id}/${timestamp}-${safeTitle}.${audioFile.name.split('.').pop()}`
+      const audioUrl = await uploadFile('song-files', audioPath, audioFile)
+
+      // Upload cover (optional)
+      let coverUrl = null
+      if (coverFile) {
+        setProgress('Uploading cover art…')
+        const coverPath = `${user.id}/${timestamp}-${safeTitle}.${coverFile.name.split('.').pop()}`
+        coverUrl = await uploadFile('cover-art', coverPath, coverFile)
+      }
+
+      // Insert song row
+      setProgress('Saving song…')
+      const songRow = {
+        artist_id: user.id,
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        audio_url: audioUrl,
+        cover_url: coverUrl,
+        status: 'pending',
+        play_count: 0,
+      }
+      if (form.genre_id) songRow.genre_id = form.genre_id
+      if (form.price) songRow.price = parseFloat(form.price)
+
+      const { error: insertError } = await supabase.from('songs').insert(songRow)
+      if (insertError) throw new Error(insertError.message)
+
+      setSuccess(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setUploading(false)
+      setProgress('')
+    }
   }
 
+  if (success) {
+    return (
+      <div className="page" style={{ maxWidth: 600 }}>
+        <div className="card" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
+          <h1 style={{ marginBottom: '0.5rem' }}>Song submitted!</h1>
+          <p style={{ color: 'var(--text)', marginBottom: '2rem' }}>
+            Your song has been submitted for review. You'll see it in your Artist Hub once approved.
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <button className="btn btn-primary" onClick={() => { setSuccess(false); setForm({ title: '', description: '', genre_id: '', price: '' }); setAudioFile(null); setCoverFile(null); setCoverPreview(null) }}>
+              Upload another
+            </button>
+            <button className="btn btn-outline" onClick={() => navigate('/artist-dashboard')}>
+              Artist Hub
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const genreOptions = genres.length
+    ? genres
+    : FALLBACK_GENRES.map((n, i) => ({ id: String(i + 1), name: n }))
+
   return (
-    <div className="page" style={{ maxWidth: 600 }}>
+    <div className="page" style={{ maxWidth: 640 }}>
       <div className="page-header">
         <h1>Upload Song</h1>
-        <p>Share your music with the NextHit community</p>
+        <p>Submit your music for review. Approved songs appear in the public feed.</p>
       </div>
 
       <div className="card">
         {error && <div className="alert alert-error">{error}</div>}
+
         <form onSubmit={handleSubmit}>
+          {/* Cover art */}
+          <div className="form-group">
+            <label>Cover Art</label>
+            <div
+              style={{
+                border: '2px dashed var(--border)', borderRadius: 10,
+                padding: '1.5rem', textAlign: 'center', cursor: 'pointer',
+                background: 'var(--surface-2)', position: 'relative',
+                transition: 'border-color 0.2s',
+              }}
+              onClick={() => document.getElementById('cover-input').click()}
+            >
+              {coverPreview ? (
+                <img src={coverPreview} alt="Cover preview" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8 }} />
+              ) : (
+                <>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🖼️</div>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Click to upload cover image</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>JPG, PNG — recommended 500×500px</p>
+                </>
+              )}
+              <input id="cover-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={handleCoverChange} />
+            </div>
+          </div>
+
           <div className="form-group">
             <label>Song Title *</label>
-            <input className="input" type="text" placeholder="My Amazing Track" value={form.title}
-              onChange={e => setForm({ ...form, title: e.target.value })} required />
+            <input className="input" type="text" placeholder="My Amazing Track"
+              value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required />
           </div>
+
           <div className="form-group">
             <label>Description</label>
-            <textarea className="input" placeholder="Tell listeners about this song…" value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })} />
+            <textarea className="input" placeholder="Tell listeners about this song…"
+              value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
           </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div className="form-group">
+              <label>Genre</label>
+              <select className="input" value={form.genre_id} onChange={e => setForm({ ...form, genre_id: e.target.value })}>
+                <option value="">Select genre</option>
+                {genreOptions.map(g => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Price (USD)</label>
+              <input className="input" type="number" min="0" step="0.01" placeholder="0.99"
+                value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
+            </div>
+          </div>
+
           <div className="form-group">
-            <label>Audio URL</label>
-            <input className="input" type="url" placeholder="https://…/song.mp3" value={form.audio_url}
-              onChange={e => setForm({ ...form, audio_url: e.target.value })} />
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Direct link to an .mp3 or audio file</span>
+            <label>Audio File *</label>
+            <div
+              style={{
+                border: '2px dashed var(--border)', borderRadius: 10,
+                padding: '1.25rem', textAlign: 'center', cursor: 'pointer',
+                background: audioFile ? 'rgba(34,197,94,0.08)' : 'var(--surface-2)',
+                borderColor: audioFile ? 'var(--success)' : 'var(--border)',
+                transition: 'all 0.2s',
+              }}
+              onClick={() => document.getElementById('audio-input').click()}
+            >
+              {audioFile ? (
+                <div>
+                  <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>✅</div>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--success)' }}>{audioFile.name}</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{(audioFile.size / 1024 / 1024).toFixed(1)} MB — click to change</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>🎵</div>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Click to upload audio file</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>MP3, WAV, AAC, FLAC</p>
+                </>
+              )}
+              <input id="audio-input" type="file" accept="audio/*" style={{ display: 'none' }}
+                onChange={e => setAudioFile(e.target.files[0] || null)} />
+            </div>
           </div>
-          <div className="form-group">
-            <label>Cover Art URL</label>
-            <input className="input" type="url" placeholder="https://…/cover.jpg" value={form.cover_url}
-              onChange={e => setForm({ ...form, cover_url: e.target.value })} />
+
+          <div className="alert alert-info" style={{ marginBottom: '1.25rem' }}>
+            ℹ️ Songs are reviewed before going live. Public listeners hear a 30-second preview only.
           </div>
-          <div className="form-group">
-            <label>Status</label>
-            <select className="input" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-              <option value="published">Published</option>
-              <option value="draft">Draft</option>
-            </select>
-          </div>
+
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button className="btn btn-primary" type="submit" disabled={loading}>
-              {loading ? 'Uploading…' : 'Upload Song'}
+            <button className="btn btn-primary btn-lg" type="submit" disabled={uploading}>
+              {uploading ? progress || 'Uploading…' : 'Submit for Review'}
             </button>
-            <button type="button" className="btn btn-outline" onClick={() => navigate(-1)}>Cancel</button>
+            <button type="button" className="btn btn-outline" onClick={() => navigate(-1)} disabled={uploading}>
+              Cancel
+            </button>
           </div>
         </form>
       </div>
