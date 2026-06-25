@@ -101,7 +101,7 @@ export default function UploadSongPage() {
         title: form.title.trim(),
         description: form.description.trim() || null,
         audio_url: audioUrl,
-        cover_url: coverUrl,
+        cover_url: coverUrl,   // confirmed column name from schema probe
         status: 'pending',
         play_count: 0,
       }
@@ -110,9 +110,26 @@ export default function UploadSongPage() {
       if (form.genre_id && genres.length > 0) songRow.genre_id = form.genre_id
       if (form.price) songRow.price = parseFloat(form.price)
 
-      const { error: insertError } = await supabase.from('songs').insert(songRow)
-      if (insertError) throw new Error(insertError.message)
+      console.log('[UploadSong] Inserting row:', songRow)
 
+      // Use .select() so we get back the created row and can confirm the insert worked.
+      // Without .select(), a silent RLS failure can return {data: null, error: null}.
+      const { data: inserted, error: insertError } = await supabase
+        .from('songs')
+        .insert(songRow)
+        .select('id, title, status')
+        .single()
+
+      console.log('[UploadSong] Insert result:', { inserted, insertError })
+
+      if (insertError) {
+        throw new Error(`Database insert failed: ${insertError.message} (code: ${insertError.code})`)
+      }
+      if (!inserted) {
+        throw new Error('Insert returned no data. The songs RLS INSERT policy may be missing — run the SQL policies in Supabase.')
+      }
+
+      console.log('[UploadSong] Row created successfully:', inserted.id)
       setSuccess(true)
     } catch (err) {
       setError(err.message)
