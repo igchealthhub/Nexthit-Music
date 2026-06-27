@@ -7,34 +7,93 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.error('Auth session loaded', session)
       setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else setLoading(false)
+      if (session?.user) {
+        fetchProfile(session.user.id, session.user)
+      } else {
+        setProfile(null)
+        setAuthError(null)
+        setLoading(false)
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.error('Auth session changed', _event, session)
       setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else { setProfile(null); setLoading(false) }
+      if (session?.user) {
+        fetchProfile(session.user.id, session.user)
+      } else {
+        setProfile(null)
+        setAuthError(null)
+        setLoading(false)
+      }
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-  async function fetchProfile(userId) {
+  async function fetchProfile(userId, authUser = null) {
     setLoading(true)
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(data ?? null)
-    setLoading(false)
-    return { data, error }
+    setAuthError(null)
+
+    const currentUser = authUser || user
+
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single()
+      console.error('Profile fetch result', { userId, data, error })
+
+      const noRows = !data && error && (
+        error.details?.includes('Results contain 0 rows') ||
+        error.message?.includes('Results contain 0 rows') ||
+        error.code === 'PGRST116'
+      )
+
+      if (noRows) {
+        console.error('Profile row missing for user, creating one', userId)
+        const defaultProfile = {
+          id: userId,
+          email: currentUser?.email ?? undefined,
+          display_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || null,
+          role: currentUser?.user_metadata?.role || 'fan',
+        }
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert(defaultProfile)
+          .select()
+          .single()
+
+        if (insertError) {
+          throw insertError
+        }
+
+        console.error('Created missing profile row', newProfile)
+        return await fetchProfile(userId, currentUser)
+      }
+
+      if (error) {
+        throw error
+      }
+
+      setProfile(data ?? null)
+      return { data, error }
+    } catch (err) {
+      console.error('Profile fetch error', err)
+      setProfile(null)
+      setAuthError(err?.message || 'Unable to load profile')
+      return { data: null, error: err }
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function refreshProfile() {
     if (!user?.id) return { data: null, error: null }
-    return await fetchProfile(user.id)
+    return await fetchProfile(user.id, user)
   }
 
   async function signUp({ email, password, displayName, role = 'fan' }) {
@@ -47,9 +106,10 @@ export function AuthProvider({ children }) {
 
   async function signIn({ email, password }) {
     const result = await supabase.auth.signInWithPassword({ email, password })
-    const userId = result.data?.session?.user?.id
+    const authUser = result.data?.session?.user
+    const userId = authUser?.id
     if (userId) {
-      await fetchProfile(userId)
+      await fetchProfile(userId, authUser)
     }
     return result
   }
@@ -78,7 +138,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, resetPassword, updateProfile, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, authError, signUp, signIn, signOut, resetPassword, updateProfile, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   )

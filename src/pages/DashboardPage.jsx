@@ -4,10 +4,30 @@ import ArtistDashboardPage from './ArtistDashboardPage'
 import AdminDashboardPage from './AdminDashboardPage'
 
 export default function DashboardPage() {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, loading, authError, refreshProfile } = useAuth()
 
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>
-  if (!profile) return <div className="loading-screen"><div className="spinner" /></div>
+
+  if (authError) {
+    return (
+      <div className="page" style={{ maxWidth: 640 }}>
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          <strong>Unable to load your profile:</strong> {authError}
+        </div>
+        <button className="btn btn-primary" onClick={refreshProfile}>Retry profile load</button>
+      </div>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <div className="page" style={{ maxWidth: 640 }}>
+        <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
+          Profile not available. Please refresh the page.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
