@@ -60,6 +60,7 @@ export default function UploadSongPage() {
   }
 
   async function uploadFile(bucket, path, file) {
+    console.log(`[UploadSong] Uploading to bucket: ${bucket}`, { bucket, path, file })
     const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
       cacheControl: '3600',
       upsert: false,
@@ -68,10 +69,19 @@ export default function UploadSongPage() {
     console.log(`[UploadSong] Storage upload result for ${bucket}`, { bucket, path, data, error })
 
     if (error) {
+      console.error(`[UploadSong] Storage upload failed for bucket ${bucket}`, error)
       throw new Error(`Storage upload failed (${bucket}): ${error.message}`)
     }
 
-    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path)
+    const { data: urlData, error: urlError } = supabase.storage.from(bucket).getPublicUrl(path)
+    if (urlError) {
+      console.error('[UploadSong] getPublicUrl error', { bucket, path, urlError })
+      throw new Error(`Failed to get public URL for uploaded file (${bucket}): ${urlError.message}`)
+    }
+    if (!urlData?.publicUrl) {
+      throw new Error(`Uploaded file URL not available for ${bucket} at path ${path}`)
+    }
+
     return urlData.publicUrl
   }
 
@@ -80,6 +90,7 @@ export default function UploadSongPage() {
     setError('')
     if (!form.title.trim()) { setError('Song title is required.'); return }
     if (!audioFile) { setError('Please select an audio file.'); return }
+    if (!user?.id) { setError('Unable to detect your user account. Please sign out and sign back in.'); return }
 
     setUploading(true)
 
@@ -87,7 +98,7 @@ export default function UploadSongPage() {
       const timestamp = Date.now()
       const safeTitle = form.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()
 
-      console.log('[UploadSong] current user id:', user?.id)
+      console.log('[UploadSong] current user id:', user.id)
       console.log('[UploadSong] selected audio file:', audioFile)
       console.log('[UploadSong] selected cover file:', coverFile)
 
@@ -126,17 +137,19 @@ export default function UploadSongPage() {
 
       const { data: inserted, error: insertError } = await supabase
         .from('songs')
-        .insert(songRow)
+        .insert([songRow])
         .select('id, title, status')
         .single()
 
       console.log('[UploadSong] songs insert result:', { inserted, insertError })
 
       if (insertError) {
+        console.error('[UploadSong] songs insert failed', insertError)
         throw new Error(`Database insert failed: ${insertError.message} (code: ${insertError.code})`)
       }
       if (!inserted) {
-        throw new Error('Insert returned no data. This may indicate an RLS policy issue or missing insert permission.')
+        console.error('[UploadSong] songs insert returned no data', { songRow })
+        throw new Error('Insert returned no data from Supabase. Check RLS policies and insert permissions.')
       }
       if (inserted.status !== 'pending') {
         console.warn('[UploadSong] Inserted song status is not pending:', inserted.status)
