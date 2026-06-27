@@ -10,21 +10,22 @@ export default function Navbar() {
   const [open, setOpen] = useState(false)
   const [artistOpen, setArtistOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [unreadMessages, setUnreadMessages] = useState(0)
 
   useEffect(() => {
-    if (!user) { setUnreadCount(0); return }
+    if (!user) { setUnreadCount(0); setUnreadMessages(0); return }
 
-    async function fetchCount() {
-      const { count } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('read', false)
-      setUnreadCount(count || 0)
+    async function fetchCounts() {
+      const [notifRes, msgRes] = await Promise.all([
+        supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('read', false),
+        supabase.from('messages').select('*', { count: 'exact', head: true }).eq('recipient_id', user.id).eq('read', false),
+      ])
+      setUnreadCount(notifRes.count || 0)
+      setUnreadMessages(msgRes.count || 0)
     }
 
-    fetchCount()
-    const iv = setInterval(fetchCount, 30000)
+    fetchCounts()
+    const iv = setInterval(fetchCounts, 30000)
     return () => clearInterval(iv)
   }, [user?.id])
 
@@ -53,8 +54,10 @@ export default function Navbar() {
         {/* Public links */}
         <NavLink to="/songs"       onClick={close}>Songs</NavLink>
         <NavLink to="/videos"      onClick={close}>Videos</NavLink>
+        <NavLink to="/trending"    onClick={close}>Trending</NavLink>
         <NavLink to="/leaderboard" onClick={close}>Leaderboard</NavLink>
         <NavLink to="/contests"    onClick={close}>Contests</NavLink>
+        <NavLink to="/livestreams" onClick={close}>Live</NavLink>
 
         {user ? (
           <>
@@ -95,6 +98,14 @@ export default function Navbar() {
             )}
 
             <NavLink to="/profile" onClick={close}>Profile</NavLink>
+
+            {/* Messages icon */}
+            <Link to="/messages" className="nav-notif-btn" onClick={close} title="Messages">
+              💬
+              {unreadMessages > 0 && (
+                <span className="notif-badge">{unreadMessages > 9 ? '9+' : unreadMessages}</span>
+              )}
+            </Link>
 
             {/* Notification bell */}
             <Link to="/notifications" className="nav-notif-btn" onClick={close} title="Notifications">

@@ -16,6 +16,9 @@ export default function FanDashboardPage() {
   const [purchases, setPurchases] = useState([])
   const [notifications, setNotifications] = useState([])
   const [playlists, setPlaylists] = useState([])
+  const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false)
+  const [newPlaylistName, setNewPlaylistName] = useState('')
+  const [newPlaylistPublic, setNewPlaylistPublic] = useState(false)
   const [contestEntries, setContestEntries] = useState([])
   const [points, setPoints] = useState(null)
   const [badges, setBadges] = useState([])
@@ -71,7 +74,7 @@ export default function FanDashboardPage() {
 
       // Optional tables
       const [playlistsRes, pointsRes, entriesRes, badgesRes] = await Promise.all([
-        supabase.from('playlists').select('id, name').eq('user_id', user.id).limit(10),
+        supabase.from('playlists').select('id, name, is_public').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
         supabase.from('fan_points').select('points').eq('user_id', user.id).maybeSingle(),
         supabase.from('contest_entries').select('id, contests(id, title, status)').eq('user_id', user.id).limit(5),
         supabase.from('user_badges').select('badge_id, badges(id, name, icon)').eq('user_id', user.id),
@@ -86,6 +89,18 @@ export default function FanDashboardPage() {
     }
     load()
   }, [user.id])
+
+  async function createPlaylist(e) {
+    e.preventDefault()
+    const { data, error } = await supabase.from('playlists').insert({
+      user_id: user.id, name: newPlaylistName, is_public: newPlaylistPublic,
+    }).select('id, name, is_public').single()
+    if (error) { alert(error.message); return }
+    setPlaylists(prev => [data, ...prev])
+    setNewPlaylistName('')
+    setNewPlaylistPublic(false)
+    setCreatePlaylistOpen(false)
+  }
 
   async function markNotifRead(id) {
     await supabase.from('notifications').update({ read: true }).eq('id', id)
@@ -111,8 +126,9 @@ export default function FanDashboardPage() {
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
         <Link to="/songs" className="btn btn-primary">🎵 Browse Songs</Link>
         <Link to="/videos" className="btn btn-outline">🎬 Browse Videos</Link>
+        <Link to="/trending" className="btn btn-outline">📈 Trending</Link>
         <Link to="/contests" className="btn btn-outline">🏆 Contests</Link>
-        <Link to="/leaderboard" className="btn btn-outline">📊 Leaderboard</Link>
+        <Link to="/messages" className="btn btn-outline">💬 Messages</Link>
       </div>
 
       {/* Stats */}
@@ -250,16 +266,22 @@ export default function FanDashboardPage() {
         <div>
           <div className="section-header" style={{ marginBottom: '1rem' }}>
             <h2>📋 Playlists</h2>
+            <button className="btn btn-primary btn-sm" onClick={() => setCreatePlaylistOpen(true)}>+ New</button>
           </div>
           {playlists.length === 0 ? (
-            <DashEmpty icon="📋" title="No playlists yet" sub="Create playlists to organize your music." />
+            <DashEmpty icon="📋" title="No playlists yet" sub="Create a playlist to organize your music." />
           ) : (
             <div className="card" style={{ padding: 0 }}>
               {playlists.map(p => (
-                <div key={p.id} className="list-row">
-                  <div className="list-thumb" style={{ background: 'var(--surface-3)' }}>📋</div>
-                  <div className="list-info"><div className="list-title">{p.name}</div></div>
-                </div>
+                <Link key={p.id} to={`/playlist/${p.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                  <div className="list-row">
+                    <div className="list-thumb" style={{ background: 'var(--surface-3)' }}>📋</div>
+                    <div className="list-info">
+                      <div className="list-title">{p.name}</div>
+                      {p.is_public && <div className="list-sub">Public</div>}
+                    </div>
+                  </div>
+                </Link>
               ))}
             </div>
           )}
@@ -317,6 +339,43 @@ export default function FanDashboardPage() {
             {recommended.map(s => <SongCard key={s.id} song={s} />)}
           </div>
         )}
+      </div>
+      <CreatePlaylistModal
+        open={createPlaylistOpen}
+        onClose={() => setCreatePlaylistOpen(false)}
+        onSubmit={createPlaylist}
+        name={newPlaylistName}
+        setName={setNewPlaylistName}
+        isPublic={newPlaylistPublic}
+        setPublic={setNewPlaylistPublic}
+      />
+    </div>
+  )
+}
+
+function CreatePlaylistModal({ open, onClose, onSubmit, name, setName, isPublic, setPublic }) {
+  if (!open) return null
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+        <div className="modal-header">
+          <h2>📋 New Playlist</h2>
+          <button className="btn btn-ghost" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={onSubmit}>
+          <div className="form-group">
+            <label>Playlist Name</label>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="My Playlist" required autoFocus />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text)' }}>
+            <input type="checkbox" checked={isPublic} onChange={e => setPublic(e.target.checked)} />
+            Make this playlist public (shareable)
+          </label>
+          <div style={{ display: 'flex', gap: '0.625rem' }}>
+            <button className="btn btn-primary" type="submit">Create</button>
+            <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
       </div>
     </div>
   )

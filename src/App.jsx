@@ -20,6 +20,10 @@ import AdminDashboardPage from './pages/AdminDashboardPage'
 import ContestDetailPage from './pages/ContestDetailPage'
 import NotificationsPage from './pages/NotificationsPage'
 import ArtistProfilePage from './pages/ArtistProfilePage'
+import TrendingPage from './pages/TrendingPage'
+import LivestreamsPage from './pages/LivestreamsPage'
+import MessagesPage from './pages/MessagesPage'
+import PlaylistDetailPage from './pages/PlaylistDetailPage'
 
 import './App.css'
 
@@ -59,8 +63,14 @@ export default function App() {
               } />
               <Route path="/contest/:id" element={<ContestDetailPage />} />
               <Route path="/artist/:id" element={<ArtistProfilePage />} />
+              <Route path="/trending" element={<TrendingPage />} />
+              <Route path="/livestreams" element={<LivestreamsPage />} />
+              <Route path="/playlist/:id" element={<PlaylistDetailPage />} />
               <Route path="/notifications" element={
                 <ProtectedRoute><NotificationsPage /></ProtectedRoute>
+              } />
+              <Route path="/messages" element={
+                <ProtectedRoute><MessagesPage /></ProtectedRoute>
               } />
             </Routes>
           </main>

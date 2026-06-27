@@ -31,7 +31,7 @@ export default function AdminDashboardPage() {
     const [s, v, p, c] = await Promise.all([
       supabase.from('songs').select('*, genres(name)').order('created_at', { ascending: false }),
       supabase.from('videos').select('*').order('created_at', { ascending: false }),
-      supabase.from('profiles').select('id, display_name, email, role, is_admin, created_at').order('created_at', { ascending: false }),
+      supabase.from('profiles').select('id, display_name, email, role, is_admin, verified, created_at').order('created_at', { ascending: false }),
       supabase.from('contests').select('*').order('created_at', { ascending: false }),
     ])
 
@@ -72,6 +72,12 @@ export default function AdminDashboardPage() {
     const { error } = await supabase.from('contests').update({ status }).eq('id', id)
     if (error) { alert(`Update failed: ${error.message}`); return }
     setContests(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+  }
+
+  async function toggleVerified(id, current) {
+    const { error } = await supabase.from('profiles').update({ verified: !current }).eq('id', id)
+    if (error) { alert(error.message); return }
+    setUsers(prev => prev.map(u => u.id === id ? { ...u, verified: !current } : u))
   }
 
   async function deleteItem(table, id, setState) {
@@ -203,7 +209,7 @@ export default function AdminDashboardPage() {
             />
           )}
 
-          {tab === 'users' && <UsersTable users={users} />}
+          {tab === 'users' && <UsersTable users={users} onVerify={toggleVerified} />}
 
           {tab === 'contests' && (
             <ContestsTable
@@ -314,7 +320,7 @@ function VideoTable({ videos, onStatus, onDelete }) {
   )
 }
 
-function UsersTable({ users }) {
+function UsersTable({ users, onVerify }) {
   if (!users.length) {
     return (
       <div className="empty-state">
@@ -329,18 +335,30 @@ function UsersTable({ users }) {
       <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>Name</th><th>Email</th><th>Role</th><th>Admin</th><th>Joined</th></tr>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Admin</th><th>Verified</th><th>Joined</th></tr>
           </thead>
           <tbody>
             {users.map(u => (
               <tr key={u.id}>
-                <td style={{ fontWeight: 600, color: 'var(--text-h)' }}>{u.display_name || '—'}</td>
+                <td style={{ fontWeight: 600, color: 'var(--text-h)' }}>
+                  {u.display_name || '—'}
+                  {u.verified && <span style={{ color: '#60a5fa', marginLeft: '0.375rem', fontSize: '0.875rem' }}>✓</span>}
+                </td>
                 <td style={{ fontSize: '0.875rem' }}>{u.email}</td>
                 <td><span className={`badge badge-${u.role || 'fan'}`}>{u.role || 'fan'}</span></td>
                 <td>
                   {u.is_admin
                     ? <span className="badge badge-admin">Yes</span>
                     : <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>—</span>}
+                </td>
+                <td>
+                  <button
+                    className={`btn btn-sm ${u.verified ? 'btn-outline' : 'btn-ghost'}`}
+                    style={u.verified ? { color: '#60a5fa', borderColor: '#60a5fa', fontSize: '0.75rem' } : { fontSize: '0.75rem' }}
+                    onClick={() => onVerify(u.id, u.verified)}
+                  >
+                    {u.verified ? '✓ Verified' : 'Verify'}
+                  </button>
                 </td>
                 <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                   {new Date(u.created_at).toLocaleDateString()}

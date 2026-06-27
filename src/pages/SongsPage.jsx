@@ -32,7 +32,7 @@ export default function SongsPage() {
 
     const { data: songData } = await supabase
       .from('songs')
-      .select('*, genres(name), profiles!artist_id(id, display_name)')
+      .select('*, genres(name), profiles!artist_id(id, display_name, verified)')
       .eq('status', 'approved')
       .order('play_count', { ascending: false })
 
@@ -356,6 +356,7 @@ function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRa
               {artistProfile && (
                 <Link to={`/artist/${artistProfile.id}`} style={{ color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, textDecoration: 'none' }}>
                   {artistProfile.display_name || 'Artist'}
+                      {artistProfile.verified && <span title="Verified" style={{ color: '#60a5fa', marginLeft: '2px' }}>✓</span>}
                 </Link>
               )}
               {genreName && <span className="genre-tag">{genreName}</span>}

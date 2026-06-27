@@ -96,8 +96,11 @@ export default function ArtistProfilePage() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
               <div>
-                <h1 style={{ fontSize: '1.75rem', marginBottom: '0.375rem' }}>
+                <h1 style={{ fontSize: '1.75rem', marginBottom: '0.375rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {artist.display_name || artist.email?.split('@')[0]}
+                  {artist.verified && (
+                    <span title="Verified Artist" style={{ fontSize: '1rem', color: '#60a5fa', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>✓ Verified</span>
+                  )}
                 </h1>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className={`badge badge-${artist.role || 'fan'}`}>{artist.role || 'fan'}</span>
