@@ -87,6 +87,10 @@ export default function UploadSongPage() {
       const timestamp = Date.now()
       const safeTitle = form.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()
 
+      console.log('[UploadSong] current user id:', user?.id)
+      console.log('[UploadSong] selected audio file:', audioFile)
+      console.log('[UploadSong] selected cover file:', coverFile)
+
       // Upload audio
       setProgress('Uploading audio…')
       const audioExtension = audioFile.name.split('.').pop()?.toLowerCase() || 'mp3'
@@ -113,12 +117,12 @@ export default function UploadSongPage() {
         genre_id: form.genre_id || null,
         audio_url: audioUrl,
         cover_url: coverUrl,
-        price: form.price ? parseFloat(form.price) : 0,
+        price: form.price ? parseFloat(form.price) : null,
         status: 'pending',
         play_count: 0,
       }
 
-      console.log('[UploadSong] Inserting row:', songRow)
+      console.log('[UploadSong] songs insert payload:', songRow)
 
       const { data: inserted, error: insertError } = await supabase
         .from('songs')
@@ -126,20 +130,23 @@ export default function UploadSongPage() {
         .select('id, title, status')
         .single()
 
-      console.log('[UploadSong] Insert result:', { inserted, insertError })
+      console.log('[UploadSong] songs insert result:', { inserted, insertError })
 
       if (insertError) {
         throw new Error(`Database insert failed: ${insertError.message} (code: ${insertError.code})`)
       }
       if (!inserted) {
-        throw new Error('Insert returned no data. The songs RLS INSERT policy may be missing — run the SQL policies in Supabase.')
+        throw new Error('Insert returned no data. This may indicate an RLS policy issue or missing insert permission.')
+      }
+      if (inserted.status !== 'pending') {
+        console.warn('[UploadSong] Inserted song status is not pending:', inserted.status)
       }
 
       console.log('[UploadSong] Row created successfully:', inserted)
       setSuccess(true)
     } catch (err) {
       console.error('[UploadSong] Error', err)
-      setError(err.message)
+      setError(err?.message || 'Something went wrong while uploading the song.')
     } finally {
       setUploading(false)
       setProgress('')
