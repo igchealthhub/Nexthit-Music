@@ -4,38 +4,53 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
 const STATUS_STYLE = {
-  pending: { badge: 'badge-pending', label: '⏳ Pending review' },
-  approved: { badge: 'badge-active', label: '✅ Live' },
-  rejected: { badge: 'badge-admin', label: '❌ Rejected' },
-  draft: { badge: 'badge-fan', label: 'Draft' },
+  pending:  { badge: 'badge-pending', label: '⏳ Pending' },
+  approved: { badge: 'badge-active',  label: '✅ Live'    },
+  rejected: { badge: 'badge-admin',   label: '❌ Rejected' },
+  draft:    { badge: 'badge-fan',     label: 'Draft'       },
 }
 
 export default function ArtistDashboardPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [songs, setSongs] = useState([])
   const [videos, setVideos] = useState([])
   const [likeCounts, setLikeCounts] = useState({})
   const [ratingAvgs, setRatingAvgs] = useState({})
   const [ratingCounts, setRatingCounts] = useState({})
+  const [recentComments, setRecentComments] = useState([])
+  const [followerCount, setFollowerCount] = useState(0)
+  const [contestEntries, setContestEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('songs')
 
+  const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Artist'
+
   useEffect(() => {
     async function load() {
-      const [s, v] = await Promise.all([
+      const [s, v, followsRes] = await Promise.all([
         supabase.from('songs').select('*, genres(name)').eq('artist_id', user.id).order('created_at', { ascending: false }),
         supabase.from('videos').select('*').eq('artist_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('artist_id', user.id),
       ])
+
       const songData = s.data || []
       setSongs(songData)
       setVideos(v.data || [])
+      setFollowerCount(followsRes.count || 0)
 
       if (songData.length) {
         const ids = songData.map(s => s.id)
+        const songTitles = {}
+        songData.forEach(s => { songTitles[s.id] = s.title })
 
-        const [likes, ratings] = await Promise.all([
+        const [likes, ratings, comments] = await Promise.all([
           supabase.from('likes').select('song_id').in('song_id', ids),
           supabase.from('ratings').select('song_id, rating').in('song_id', ids),
+          supabase.from('comments')
+            .select('id, song_id, comment, created_at')
+            .in('song_id', ids)
+            .order('created_at', { ascending: false })
+            .limit(8),
         ])
 
         const lc = {}
@@ -50,7 +65,17 @@ export default function ArtistDashboardPage() {
         Object.keys(avgs).forEach(id => { avgs[id] = avgs[id] / counts[id] })
         setRatingAvgs(avgs)
         setRatingCounts(counts)
+
+        setRecentComments((comments.data || []).map(c => ({ ...c, songTitle: songTitles[c.song_id] })))
       }
+
+      // Contest entries — optional table, silently ignore if it doesn't exist
+      const entriesRes = await supabase
+        .from('contest_entries')
+        .select('id, contests(id, title, status)')
+        .eq('user_id', user.id)
+        .limit(5)
+      if (!entriesRes.error) setContestEntries(entriesRes.data?.map(e => e.contests).filter(Boolean) || [])
 
       setLoading(false)
     }
@@ -59,31 +84,40 @@ export default function ArtistDashboardPage() {
 
   async function deleteSong(id) {
     if (!confirm('Delete this song? This cannot be undone.')) return
-    await supabase.from('songs').delete().eq('id', id)
+    const { error } = await supabase.from('songs').delete().eq('id', id)
+    if (error) { alert(`Delete failed: ${error.message}`); return }
     setSongs(prev => prev.filter(s => s.id !== id))
   }
 
   async function deleteVideo(id) {
     if (!confirm('Delete this video?')) return
-    await supabase.from('videos').delete().eq('id', id)
+    const { error } = await supabase.from('videos').delete().eq('id', id)
+    if (error) { alert(`Delete failed: ${error.message}`); return }
     setVideos(prev => prev.filter(v => v.id !== id))
   }
 
-  const totalPlays = songs.reduce((sum, s) => sum + (s.play_count || 0), 0)
-  const totalLikes = Object.values(likeCounts).reduce((a, b) => a + b, 0)
+  const totalPlays   = songs.reduce((sum, s) => sum + (s.play_count || 0), 0)
+  const totalLikes   = Object.values(likeCounts).reduce((a, b) => a + b, 0)
   const approvedCount = songs.filter(s => s.status === 'approved').length
-  const pendingCount = songs.filter(s => s.status === 'pending').length
+  const pendingCount  = songs.filter(s => s.status === 'pending').length
+  const rejectedCount = songs.filter(s => s.status === 'rejected').length
+  const maxPlays = Math.max(...songs.map(s => s.play_count || 0), 1)
 
   return (
     <div className="page">
+      {/* Header */}
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1>🎤 Artist Hub</h1>
-          <p>Manage your music and track performance</p>
+          <h1>🎤 {displayName}</h1>
+          <div style={{ marginTop: '0.375rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span className="badge badge-artist">Artist</span>
+            {profile?.is_admin && <span className="badge badge-admin">Admin</span>}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <Link to="/upload/song" className="btn btn-primary btn-sm">+ Upload Song</Link>
           <Link to="/upload/video" className="btn btn-outline btn-sm">+ Upload Video</Link>
+          <Link to="/contests" className="btn btn-outline btn-sm">🏆 Enter Contest</Link>
         </div>
       </div>
 
@@ -91,6 +125,7 @@ export default function ArtistDashboardPage() {
         <div className="loading-screen"><div className="spinner" /></div>
       ) : (
         <>
+          {/* Stats */}
           <div className="stats-row">
             <div className="stat-card">
               <div className="stat-value">{songs.length}</div>
@@ -110,46 +145,54 @@ export default function ArtistDashboardPage() {
             </div>
             <div className="stat-card">
               <div className="stat-value" style={{ color: '#f87171' }}>{totalLikes}</div>
-              <div className="stat-label">Total Likes</div>
+              <div className="stat-label">Likes</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value" style={{ color: 'var(--accent)' }}>{followerCount}</div>
+              <div className="stat-label">Followers</div>
             </div>
           </div>
 
           {pendingCount > 0 && (
             <div className="alert alert-info" style={{ marginBottom: '1.5rem' }}>
-              ⏳ You have {pendingCount} song{pendingCount > 1 ? 's' : ''} pending review. They'll go live once approved by an admin.
+              ⏳ You have {pendingCount} song{pendingCount > 1 ? 's' : ''} pending review. They'll go live once approved.
+            </div>
+          )}
+          {rejectedCount > 0 && (
+            <div className="alert alert-error" style={{ marginBottom: '1.5rem' }}>
+              ❌ {rejectedCount} song{rejectedCount > 1 ? 's were' : ' was'} rejected. Upload a revised version or contact support.
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-            <button className={`btn btn-sm ${tab === 'songs' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTab('songs')}>
-              🎵 Songs ({songs.length})
-            </button>
-            <button className={`btn btn-sm ${tab === 'videos' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTab('videos')}>
-              🎬 Videos ({videos.length})
-            </button>
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+            {[
+              { key: 'songs',     label: `🎵 Songs (${songs.length})`  },
+              { key: 'videos',    label: `🎬 Videos (${videos.length})` },
+              { key: 'analytics', label: '📊 Analytics'                 },
+            ].map(t => (
+              <button key={t.key}
+                className={`btn btn-sm ${tab === t.key ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setTab(t.key)}
+              >{t.label}</button>
+            ))}
           </div>
 
+          {/* Songs tab */}
           {tab === 'songs' && (
             songs.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">🎵</div>
                 <h3>No songs yet</h3>
-                <Link to="/upload/song" className="btn btn-primary" style={{ marginTop: '1rem' }}>Upload your first song</Link>
+                <p>Upload your first song to get started.</p>
+                <Link to="/upload/song" className="btn btn-primary" style={{ marginTop: '1rem' }}>Upload Song</Link>
               </div>
             ) : (
               <div className="card" style={{ padding: 0 }}>
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
-                      <tr>
-                        <th>Song</th>
-                        <th>Status</th>
-                        <th>Plays</th>
-                        <th>Likes</th>
-                        <th>Rating</th>
-                        <th>Price</th>
-                        <th></th>
-                      </tr>
+                      <tr><th>Song</th><th>Status</th><th>Plays</th><th>Likes</th><th>Rating</th><th>Price</th><th></th></tr>
                     </thead>
                     <tbody>
                       {songs.map(s => {
@@ -159,8 +202,10 @@ export default function ArtistDashboardPage() {
                           <tr key={s.id}>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-                                <div style={{ width: 36, height: 36, borderRadius: 6, background: 'var(--surface-2)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}>
-                                  {s.cover_url ? <img src={s.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                                <div style={{ width: 36, height: 36, borderRadius: 6, background: 'var(--surface-2)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {s.cover_url
+                                    ? <img src={s.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    : '🎵'}
                                 </div>
                                 <div>
                                   <div style={{ fontWeight: 600, color: 'var(--text-h)', fontSize: '0.9rem' }}>{s.title}</div>
@@ -174,12 +219,16 @@ export default function ArtistDashboardPage() {
                             <td>
                               {avgR ? (
                                 <span title={`${ratingCounts[s.id]} ratings`}>
-                                  ⭐ {avgR.toFixed(1)}
-                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.25rem' }}>({ratingCounts[s.id]})</span>
+                                  ⭐ {avgR.toFixed(1)}{' '}
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>({ratingCounts[s.id]})</span>
                                 </span>
                               ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                             </td>
-                            <td>{s.price > 0 ? `$${Number(s.price).toFixed(2)}` : <span style={{ color: 'var(--text-muted)' }}>Free</span>}</td>
+                            <td>
+                              {s.price > 0
+                                ? `$${Number(s.price).toFixed(2)}`
+                                : <span style={{ color: 'var(--text-muted)' }}>Free</span>}
+                            </td>
                             <td>
                               <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => deleteSong(s.id)}>Delete</button>
                             </td>
@@ -193,12 +242,14 @@ export default function ArtistDashboardPage() {
             )
           )}
 
+          {/* Videos tab */}
           {tab === 'videos' && (
             videos.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">🎬</div>
                 <h3>No videos yet</h3>
-                <Link to="/upload/video" className="btn btn-primary" style={{ marginTop: '1rem' }}>Upload your first video</Link>
+                <p>Upload your first video to grow your audience.</p>
+                <Link to="/upload/video" className="btn btn-primary" style={{ marginTop: '1rem' }}>Upload Video</Link>
               </div>
             ) : (
               <div className="card" style={{ padding: 0 }}>
@@ -214,8 +265,12 @@ export default function ArtistDashboardPage() {
                           <tr key={v.id}>
                             <td style={{ fontWeight: 600, color: 'var(--text-h)' }}>{v.title}</td>
                             <td><span className={`badge ${st.badge}`}>{st.label}</span></td>
-                            <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{new Date(v.created_at).toLocaleDateString()}</td>
-                            <td><button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => deleteVideo(v.id)}>Delete</button></td>
+                            <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                              {new Date(v.created_at).toLocaleDateString()}
+                            </td>
+                            <td>
+                              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => deleteVideo(v.id)}>Delete</button>
+                            </td>
                           </tr>
                         )
                       })}
@@ -224,6 +279,90 @@ export default function ArtistDashboardPage() {
                 </div>
               </div>
             )
+          )}
+
+          {/* Analytics tab */}
+          {tab === 'analytics' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+              {/* Play count chart */}
+              <div className="card">
+                <h3 style={{ marginBottom: '1.25rem' }}>🎧 Plays by Song</h3>
+                {songs.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No songs uploaded yet.</p>
+                ) : (
+                  <div className="bar-chart">
+                    {[...songs]
+                      .sort((a, b) => (b.play_count || 0) - (a.play_count || 0))
+                      .map(s => (
+                        <div key={s.id} className="bar-row">
+                          <div className="bar-label" title={s.title}>{s.title}</div>
+                          <div className="bar-track">
+                            <div className="bar-fill" style={{ width: `${((s.play_count || 0) / maxPlays) * 100}%` }} />
+                          </div>
+                          <div className="bar-value">{(s.play_count || 0).toLocaleString()}</div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Recent Comments */}
+              <div className="card">
+                <h3 style={{ marginBottom: '1rem' }}>💬 Recent Comments</h3>
+                {recentComments.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    No comments on your songs yet. Share your music to get feedback!
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {recentComments.map(c => (
+                      <div key={c.id} style={{ padding: '0.875rem', background: 'var(--surface-2)', borderRadius: 8 }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>
+                          On <span style={{ color: 'var(--accent)' }}>{c.songTitle}</span>
+                          {' · '}
+                          {new Date(c.created_at).toLocaleDateString()}
+                        </div>
+                        <div style={{ fontSize: '0.9rem', color: 'var(--text-h)', lineHeight: 1.5 }}>{c.comment}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Revenue placeholder */}
+              <div className="card" style={{ textAlign: 'center', padding: '2.5rem 2rem' }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>💰</div>
+                <h3 style={{ marginBottom: '0.5rem' }}>Revenue Tracking</h3>
+                <p style={{ color: 'var(--text)', fontSize: '0.9rem', maxWidth: 380, margin: '0 auto 1rem' }}>
+                  Monetization and revenue analytics are coming soon. Set a price on your songs now to be ready when it launches.
+                </p>
+                <span className="badge badge-pending">Coming Soon</span>
+              </div>
+
+              {/* Contest Entries */}
+              <div className="card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3>🏆 Contest Entries</h3>
+                  <Link to="/contests" className="btn btn-outline btn-sm">Browse Contests</Link>
+                </div>
+                {contestEntries.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    You haven't entered any contests yet. Contests are a great way to get discovered.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {contestEntries.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.625rem 0.875rem', background: 'var(--surface-2)', borderRadius: 8 }}>
+                        <span style={{ fontWeight: 500, color: 'var(--text-h)', fontSize: '0.9rem' }}>{c.title}</span>
+                        <span className={`badge ${c.status === 'active' ? 'badge-active' : 'badge-pending'}`}>{c.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+            </div>
           )}
         </>
       )}
