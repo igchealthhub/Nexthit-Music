@@ -21,7 +21,7 @@ export default function Navbar() {
   }
 
   const isArtist = profile?.role === 'artist'
-  const isAdmin  = profile?.role === 'admin'
+  const isAdmin  = profile?.is_admin === true
 
   return (
     <nav className="navbar">

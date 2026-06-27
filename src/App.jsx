@@ -43,16 +43,16 @@ export default function App() {
                 <ProtectedRoute><ProfilePage /></ProtectedRoute>
               } />
               <Route path="/upload/song" element={
-                <ProtectedRoute roles={['artist', 'admin']}><UploadSongPage /></ProtectedRoute>
+                <ProtectedRoute roles={['artist']}><UploadSongPage /></ProtectedRoute>
               } />
               <Route path="/upload/video" element={
-                <ProtectedRoute roles={['artist', 'admin']}><UploadVideoPage /></ProtectedRoute>
+                <ProtectedRoute roles={['artist']}><UploadVideoPage /></ProtectedRoute>
               } />
               <Route path="/artist-dashboard" element={
-                <ProtectedRoute roles={['artist', 'admin']}><ArtistDashboardPage /></ProtectedRoute>
+                <ProtectedRoute roles={['artist']}><ArtistDashboardPage /></ProtectedRoute>
               } />
               <Route path="/admin" element={
-                <ProtectedRoute roles={['admin']}><AdminDashboardPage /></ProtectedRoute>
+                <ProtectedRoute adminOnly><AdminDashboardPage /></ProtectedRoute>
               } />
             </Routes>
           </main>
