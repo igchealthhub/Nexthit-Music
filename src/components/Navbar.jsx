@@ -41,7 +41,7 @@ export default function Navbar() {
   }
 
   const isArtist = profile?.role === 'artist'
-  const isAdmin  = profile?.is_admin === true
+  const isAdmin = profile?.is_admin === true
 
   return (
     <nav className="navbar">
@@ -66,7 +66,7 @@ export default function Navbar() {
             <NavLink to="/dashboard" onClick={close}>Dashboard</NavLink>
 
             {/* Artist section */}
-            {(isArtist || isAdmin) && (
+            {isArtist && (
               <div className="nav-dropdown-wrap">
                 <button
                   className={`nav-dropdown-trigger ${artistOpen ? 'active' : ''}`}

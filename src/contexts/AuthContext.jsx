@@ -25,9 +25,16 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(userId) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(data)
+    setLoading(true)
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single()
+    setProfile(data ?? null)
     setLoading(false)
+    return { data, error }
+  }
+
+  async function refreshProfile() {
+    if (!user?.id) return { data: null, error: null }
+    return await fetchProfile(user.id)
   }
 
   async function signUp({ email, password, displayName, role = 'fan' }) {
@@ -39,7 +46,12 @@ export function AuthProvider({ children }) {
   }
 
   async function signIn({ email, password }) {
-    return await supabase.auth.signInWithPassword({ email, password })
+    const result = await supabase.auth.signInWithPassword({ email, password })
+    const userId = result.data?.session?.user?.id
+    if (userId) {
+      await fetchProfile(userId)
+    }
+    return result
   }
 
   async function signOut() {
@@ -66,7 +78,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, resetPassword, updateProfile, fetchProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, resetPassword, updateProfile, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   )

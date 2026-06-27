@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -17,6 +17,22 @@ export default function ProfilePage() {
   })
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setForm({
+      display_name: profile?.display_name || '',
+      avatar_url: profile?.avatar_url || '',
+      bio: profile?.bio || '',
+      social_links: {
+        instagram: profile?.social_links?.instagram || '',
+        twitter: profile?.social_links?.twitter || '',
+        spotify: profile?.social_links?.spotify || '',
+        website: profile?.social_links?.website || '',
+      },
+    })
+  }, [profile])
+
+  const memberSince = profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'
 
   function setSocial(key, val) {
     setForm(f => ({ ...f, social_links: { ...f.social_links, [key]: val } }))
@@ -62,7 +78,7 @@ export default function ProfilePage() {
 
         <div style={{ display: 'grid', gap: '0.5rem', fontSize: '0.9rem', color: 'var(--text)' }}>
           <div><strong style={{ color: 'var(--text-h)' }}>Email:</strong> {user?.email}</div>
-          <div><strong style={{ color: 'var(--text-h)' }}>Member since:</strong> {new Date(profile?.created_at).toLocaleDateString()}</div>
+          <div><strong style={{ color: 'var(--text-h)' }}>Member since:</strong> {memberSince}</div>
         </div>
       </div>
 

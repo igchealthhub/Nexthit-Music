@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 export default function ProtectedRoute({ children, roles, adminOnly }) {
   const { user, profile, loading } = useAuth()
 
-  if (loading) {
+  if (loading || (user && !profile)) {
     return (
       <div className="loading-screen">
         <div className="spinner" />
