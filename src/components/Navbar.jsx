@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
 import './Navbar.css'
 
 export default function Navbar() {
@@ -8,6 +9,24 @@ export default function Navbar() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [artistOpen, setArtistOpen] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    if (!user) { setUnreadCount(0); return }
+
+    async function fetchCount() {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false)
+      setUnreadCount(count || 0)
+    }
+
+    fetchCount()
+    const iv = setInterval(fetchCount, 30000)
+    return () => clearInterval(iv)
+  }, [user?.id])
 
   async function handleSignOut() {
     await signOut()
@@ -76,6 +95,15 @@ export default function Navbar() {
             )}
 
             <NavLink to="/profile" onClick={close}>Profile</NavLink>
+
+            {/* Notification bell */}
+            <Link to="/notifications" className="nav-notif-btn" onClick={close} title="Notifications">
+              🔔
+              {unreadCount > 0 && (
+                <span className="notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
+              )}
+            </Link>
+
             <button className="btn btn-outline btn-sm" onClick={handleSignOut}>Log out</button>
           </>
         ) : (

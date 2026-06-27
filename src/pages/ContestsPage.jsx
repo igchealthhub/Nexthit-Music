@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const STATUS_COLORS = {
@@ -15,7 +16,7 @@ export default function ContestsPage() {
   useEffect(() => {
     supabase
       .from('contests')
-      .select('*')
+      .select('*, contest_entries(id)')
       .order('created_at', { ascending: false })
       .then(({ data }) => { setContests(data || []); setLoading(false) })
   }, [])
@@ -51,24 +52,35 @@ export default function ContestsPage() {
         </div>
       ) : (
         <div className="grid-2">
-          {filtered.map(c => (
-            <div key={c.id} className="card">
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                <h3 style={{ fontSize: '1.0625rem' }}>{c.title}</h3>
-                <span className={`badge ${STATUS_COLORS[c.status] || 'badge-pending'}`} style={{ flexShrink: 0 }}>
-                  {c.status}
-                </span>
+          {filtered.map(c => {
+            const entryCount = c.contest_entries?.length || 0
+            return (
+              <div key={c.id} className="card">
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <h3 style={{ fontSize: '1.0625rem' }}>{c.title}</h3>
+                  <span className={`badge ${STATUS_COLORS[c.status] || 'badge-pending'}`} style={{ flexShrink: 0 }}>
+                    {c.status}
+                  </span>
+                </div>
+                {c.description && (
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text)', lineHeight: 1.6, marginBottom: '1rem' }}>
+                    {c.description}
+                  </p>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    {entryCount} {entryCount === 1 ? 'entry' : 'entries'} · {new Date(c.created_at).toLocaleDateString()}
+                  </div>
+                  <Link
+                    to={`/contest/${c.id}`}
+                    className={`btn btn-sm ${c.status === 'active' ? 'btn-primary' : 'btn-outline'}`}
+                  >
+                    {c.status === 'active' ? '🗳️ Vote & Enter' : '🔍 View'}
+                  </Link>
+                </div>
               </div>
-              {c.description && (
-                <p style={{ fontSize: '0.9rem', color: 'var(--text)', lineHeight: 1.6, marginBottom: '1rem' }}>
-                  {c.description}
-                </p>
-              )}
-              <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                Created {new Date(c.created_at).toLocaleDateString()}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

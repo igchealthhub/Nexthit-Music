@@ -17,6 +17,9 @@ import UploadSongPage from './pages/UploadSongPage'
 import UploadVideoPage from './pages/UploadVideoPage'
 import ArtistDashboardPage from './pages/ArtistDashboardPage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
+import ContestDetailPage from './pages/ContestDetailPage'
+import NotificationsPage from './pages/NotificationsPage'
+import ArtistProfilePage from './pages/ArtistProfilePage'
 
 import './App.css'
 
@@ -53,6 +56,11 @@ export default function App() {
               } />
               <Route path="/admin" element={
                 <ProtectedRoute adminOnly><AdminDashboardPage /></ProtectedRoute>
+              } />
+              <Route path="/contest/:id" element={<ContestDetailPage />} />
+              <Route path="/artist/:id" element={<ArtistProfilePage />} />
+              <Route path="/notifications" element={
+                <ProtectedRoute><NotificationsPage /></ProtectedRoute>
               } />
             </Routes>
           </main>

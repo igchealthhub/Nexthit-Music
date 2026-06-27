@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import SnippetPlayer from '../components/SnippetPlayer'
@@ -7,6 +7,7 @@ import './SongsPage.css'
 
 export default function SongsPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [songs, setSongs] = useState([])
   const [likeCounts, setLikeCounts] = useState({})
   const [ratingAvgs, setRatingAvgs] = useState({})
@@ -14,23 +15,24 @@ export default function SongsPage() {
   const [userLikes, setUserLikes] = useState(new Set())
   const [userRatings, setUserRatings] = useState({})
   const [commentCounts, setCommentCounts] = useState({})
+  const [userPurchases, setUserPurchases] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [activePlayer, setActivePlayer] = useState(null)
   const [commentModal, setCommentModal] = useState(null)
   const [commentText, setCommentText] = useState('')
   const [comments, setComments] = useState([])
   const [loadingComments, setLoadingComments] = useState(false)
+  const [purchaseModal, setPurchaseModal] = useState(null)
+  const [purchasing, setPurchasing] = useState(false)
 
-  useEffect(() => {
-    loadAll()
-  }, [user])
+  useEffect(() => { loadAll() }, [user])
 
   async function loadAll() {
     setLoading(true)
 
     const { data: songData } = await supabase
       .from('songs')
-      .select('*, genres(name)')
+      .select('*, genres(name), profiles!artist_id(id, display_name)')
       .eq('status', 'approved')
       .order('play_count', { ascending: false })
 
@@ -39,16 +41,18 @@ export default function SongsPage() {
 
     const ids = songData.map(s => s.id)
 
-    // Likes counts
-    const { data: likesData } = await supabase.from('likes').select('song_id').in('song_id', ids)
+    const [likesData, ratingsData, commentData] = await Promise.all([
+      supabase.from('likes').select('song_id').in('song_id', ids),
+      supabase.from('ratings').select('song_id, rating').in('song_id', ids),
+      supabase.from('comments').select('song_id').in('song_id', ids),
+    ])
+
     const lc = {}
-    likesData?.forEach(l => { lc[l.song_id] = (lc[l.song_id] || 0) + 1 })
+    likesData.data?.forEach(l => { lc[l.song_id] = (lc[l.song_id] || 0) + 1 })
     setLikeCounts(lc)
 
-    // Ratings
-    const { data: ratingsData } = await supabase.from('ratings').select('song_id, rating').in('song_id', ids)
     const avgs = {}, counts = {}
-    ratingsData?.forEach(r => {
+    ratingsData.data?.forEach(r => {
       avgs[r.song_id] = (avgs[r.song_id] || 0) + r.rating
       counts[r.song_id] = (counts[r.song_id] || 0) + 1
     })
@@ -56,38 +60,35 @@ export default function SongsPage() {
     setRatingAvgs(avgs)
     setRatingCounts(counts)
 
-    // Comment counts
-    const { data: commentData } = await supabase.from('comments').select('song_id').in('song_id', ids)
     const cc = {}
-    commentData?.forEach(c => { cc[c.song_id] = (cc[c.song_id] || 0) + 1 })
+    commentData.data?.forEach(c => { cc[c.song_id] = (cc[c.song_id] || 0) + 1 })
     setCommentCounts(cc)
 
-    // Current user's likes + ratings
     if (user) {
-      const { data: myLikes } = await supabase.from('likes').select('song_id').eq('user_id', user.id).in('song_id', ids)
-      setUserLikes(new Set(myLikes?.map(l => l.song_id)))
-
-      const { data: myRatings } = await supabase.from('ratings').select('song_id, rating').eq('user_id', user.id).in('song_id', ids)
+      const [myLikes, myRatings, myPurchases] = await Promise.all([
+        supabase.from('likes').select('song_id').eq('user_id', user.id).in('song_id', ids),
+        supabase.from('ratings').select('song_id, rating').eq('user_id', user.id).in('song_id', ids),
+        supabase.from('purchases').select('song_id').eq('buyer_id', user.id).in('song_id', ids),
+      ])
+      setUserLikes(new Set(myLikes.data?.map(l => l.song_id)))
       const ur = {}
-      myRatings?.forEach(r => { ur[r.song_id] = r.rating })
+      myRatings.data?.forEach(r => { ur[r.song_id] = r.rating })
       setUserRatings(ur)
+      setUserPurchases(new Set(myPurchases.data?.map(p => p.song_id)))
     }
 
     setLoading(false)
   }
 
   async function handleLike(song) {
-    if (!user) return
+    if (!user) { navigate('/login'); return }
     const liked = userLikes.has(song.id)
-
-    // Optimistic update
     setUserLikes(prev => {
       const next = new Set(prev)
       liked ? next.delete(song.id) : next.add(song.id)
       return next
     })
-    setLikeCounts(prev => ({ ...prev, [song.id]: (prev[song.id] || 0) + (liked ? -1 : 1) }))
-
+    setLikeCounts(prev => ({ ...prev, [song.id]: Math.max(0, (prev[song.id] || 0) + (liked ? -1 : 1)) }))
     if (liked) {
       await supabase.from('likes').delete().eq('user_id', user.id).eq('song_id', song.id)
     } else {
@@ -96,18 +97,14 @@ export default function SongsPage() {
   }
 
   async function handleRate(song, stars) {
-    if (!user) return
+    if (!user) { navigate('/login'); return }
     const existing = userRatings[song.id]
-
     setUserRatings(prev => ({ ...prev, [song.id]: stars }))
-
     if (existing) {
       await supabase.from('ratings').update({ rating: stars }).eq('user_id', user.id).eq('song_id', song.id)
     } else {
       await supabase.from('ratings').insert({ user_id: user.id, song_id: song.id, rating: stars })
     }
-
-    // Refetch avg for this song
     const { data } = await supabase.from('ratings').select('rating').eq('song_id', song.id)
     if (data?.length) {
       const avg = data.reduce((s, r) => s + r.rating, 0) / data.length
@@ -145,15 +142,49 @@ export default function SongsPage() {
   }
 
   async function trackPlay(song) {
-    // Insert play record
     supabase.from('song_plays').insert({
       song_id: song.id,
       user_id: user?.id || null,
       played_at: new Date().toISOString(),
     })
-    // Increment play_count
     supabase.from('songs').update({ play_count: (song.play_count || 0) + 1 }).eq('id', song.id)
     setSongs(prev => prev.map(s => s.id === song.id ? { ...s, play_count: (s.play_count || 0) + 1 } : s))
+  }
+
+  function handleBuy(song) {
+    if (!user) { navigate('/login'); return }
+    if (userPurchases.has(song.id)) return
+    if (!song.price || song.price <= 0) {
+      // Free song — grant access immediately
+      setUserPurchases(prev => new Set([...prev, song.id]))
+      return
+    }
+    setPurchaseModal(song)
+  }
+
+  async function confirmPurchase() {
+    if (!purchaseModal || !user || purchasing) return
+    setPurchasing(true)
+    const { error } = await supabase.from('purchases').insert({
+      buyer_id: user.id,
+      song_id: purchaseModal.id,
+      amount: purchaseModal.price || 0,
+      status: 'completed',
+    })
+    if (error) {
+      if (error.code === '23505') {
+        // Already purchased (unique constraint)
+        setUserPurchases(prev => new Set([...prev, purchaseModal.id]))
+      } else {
+        alert(`Purchase failed: ${error.message}`)
+        setPurchasing(false)
+        return
+      }
+    } else {
+      setUserPurchases(prev => new Set([...prev, purchaseModal.id]))
+    }
+    setPurchaseModal(null)
+    setPurchasing(false)
   }
 
   return (
@@ -173,27 +204,76 @@ export default function SongsPage() {
         </div>
       ) : (
         <div className="songs-grid">
-          {songs.map(song => (
-            <SongCard
-              key={song.id}
-              song={song}
-              user={user}
-              liked={userLikes.has(song.id)}
-              likeCount={likeCounts[song.id] || 0}
-              avgRating={ratingAvgs[song.id] || 0}
-              ratingCount={ratingCounts[song.id] || 0}
-              userRating={userRatings[song.id] || 0}
-              commentCount={commentCounts[song.id] || 0}
-              isActive={activePlayer === song.id}
-              onPlay={() => {
-                setActivePlayer(song.id)
-                trackPlay(song)
-              }}
-              onLike={() => handleLike(song)}
-              onRate={stars => handleRate(song, stars)}
-              onComment={() => openComments(song)}
-            />
-          ))}
+          {songs.map(song => {
+            const purchased = userPurchases.has(song.id)
+            const isFree = !song.price || song.price <= 0
+            const hasFullAccess = purchased || isFree
+            return (
+              <SongCard
+                key={song.id}
+                song={song}
+                user={user}
+                liked={userLikes.has(song.id)}
+                likeCount={likeCounts[song.id] || 0}
+                avgRating={ratingAvgs[song.id] || 0}
+                ratingCount={ratingCounts[song.id] || 0}
+                userRating={userRatings[song.id] || 0}
+                commentCount={commentCounts[song.id] || 0}
+                purchased={purchased}
+                isFree={isFree}
+                fullAccess={hasFullAccess}
+                isActive={activePlayer === song.id}
+                onPlay={() => {
+                  setActivePlayer(song.id)
+                  trackPlay(song)
+                }}
+                onLike={() => handleLike(song)}
+                onRate={stars => handleRate(song, stars)}
+                onComment={() => openComments(song)}
+                onBuy={() => handleBuy(song)}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {/* Purchase confirmation modal */}
+      {purchaseModal && (
+        <div className="modal-overlay" onClick={() => !purchasing && setPurchaseModal(null)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h2>🎵 Buy Full Song</h2>
+              <button className="btn btn-ghost" onClick={() => setPurchaseModal(null)} disabled={purchasing}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', margin: '1.25rem 0' }}>
+              <div style={{ width: 60, height: 60, borderRadius: 10, background: 'var(--surface-2)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.75rem', flexShrink: 0 }}>
+                {purchaseModal.cover_url ? <img src={purchaseModal.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--text-h)', fontSize: '1.0625rem' }}>{purchaseModal.title}</div>
+                {purchaseModal.profiles?.display_name && (
+                  <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                    {purchaseModal.profiles.display_name}
+                  </div>
+                )}
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--accent)', marginTop: '0.375rem' }}>
+                  ${Number(purchaseModal.price).toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '1.25rem', fontSize: '0.875rem', color: 'var(--text)', lineHeight: 1.6 }}>
+              💳 <strong>Payment processing coming soon.</strong> Clicking confirm will record your purchase and unlock the full song. No payment will be charged at this time.
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={confirmPurchase} disabled={purchasing}>
+                {purchasing ? 'Processing…' : `Confirm Purchase`}
+              </button>
+              <button className="btn btn-outline" onClick={() => setPurchaseModal(null)} disabled={purchasing}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -217,9 +297,7 @@ export default function SongsPage() {
                     rows={2}
                   />
                 </div>
-                <button className="btn btn-primary btn-sm" type="submit" disabled={!commentText.trim()}>
-                  Post
-                </button>
+                <button className="btn btn-primary btn-sm" type="submit" disabled={!commentText.trim()}>Post</button>
               </form>
             ) : (
               <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
@@ -235,7 +313,7 @@ export default function SongsPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
                 {comments.map(c => (
                   <div key={c.id} style={{ display: 'flex', gap: '0.625rem' }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '0.875rem' }}>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '0.875rem', overflow: 'hidden' }}>
                       {c.profiles?.avatar_url ? <img src={c.profiles.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} /> : '👤'}
                     </div>
                     <div>
@@ -258,8 +336,9 @@ export default function SongsPage() {
   )
 }
 
-function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRating, commentCount, isActive, onPlay, onLike, onRate, onComment }) {
+function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRating, commentCount, purchased, isFree, fullAccess, isActive, onPlay, onLike, onRate, onComment, onBuy }) {
   const genreName = song.genres?.name || null
+  const artistProfile = song.profiles
 
   return (
     <div className={`song-card ${isActive ? 'active' : ''}`}>
@@ -274,16 +353,25 @@ function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRa
           <div>
             <div className="song-card-title">{song.title}</div>
             <div className="song-card-meta">
+              {artistProfile && (
+                <Link to={`/artist/${artistProfile.id}`} style={{ color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, textDecoration: 'none' }}>
+                  {artistProfile.display_name || 'Artist'}
+                </Link>
+              )}
               {genreName && <span className="genre-tag">{genreName}</span>}
               <span>🎧 {(song.play_count || 0).toLocaleString()} plays</span>
             </div>
           </div>
-          {song.price > 0 && (
-            <div className="song-price">${Number(song.price).toFixed(2)}</div>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+            {song.price > 0 && (
+              <div className="song-price">${Number(song.price).toFixed(2)}</div>
+            )}
+            {purchased && <span className="badge badge-active" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}>✅ Owned</span>}
+            {isFree && <span className="badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', background: 'var(--surface-2)' }}>Free</span>}
+          </div>
         </div>
 
-        <SnippetPlayer src={song.audio_url} songId={song.id} onPlayStart={onPlay} />
+        <SnippetPlayer src={song.audio_url} songId={song.id} onPlayStart={onPlay} fullAccess={fullAccess} />
 
         <div className="song-card-actions">
           <button
@@ -312,11 +400,13 @@ function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRa
             💬 {commentCount > 0 && commentCount}
           </button>
 
-          {song.price > 0 ? (
-            <button className="btn btn-primary btn-sm buy-btn">Buy Full Song</button>
-          ) : (
-            <button className="btn btn-outline btn-sm buy-btn" disabled style={{ opacity: 0.5 }}>Free</button>
-          )}
+          {song.price > 0 && !purchased ? (
+            <button className="btn btn-primary btn-sm buy-btn" onClick={onBuy}>
+              Buy Full Song
+            </button>
+          ) : song.price > 0 && purchased ? (
+            <span className="btn btn-outline btn-sm buy-btn" style={{ opacity: 0.7, cursor: 'default' }}>✅ Purchased</span>
+          ) : null}
         </div>
       </div>
     </div>

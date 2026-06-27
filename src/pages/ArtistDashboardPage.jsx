@@ -20,6 +20,7 @@ export default function ArtistDashboardPage() {
   const [recentComments, setRecentComments] = useState([])
   const [followerCount, setFollowerCount] = useState(0)
   const [contestEntries, setContestEntries] = useState([])
+  const [songPurchases, setSongPurchases] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('songs')
 
@@ -43,7 +44,7 @@ export default function ArtistDashboardPage() {
         const songTitles = {}
         songData.forEach(s => { songTitles[s.id] = s.title })
 
-        const [likes, ratings, comments] = await Promise.all([
+        const [likes, ratings, comments, purchasesRes] = await Promise.all([
           supabase.from('likes').select('song_id').in('song_id', ids),
           supabase.from('ratings').select('song_id, rating').in('song_id', ids),
           supabase.from('comments')
@@ -51,6 +52,9 @@ export default function ArtistDashboardPage() {
             .in('song_id', ids)
             .order('created_at', { ascending: false })
             .limit(8),
+          supabase.from('purchases')
+            .select('id, song_id, amount, created_at')
+            .in('song_id', ids),
         ])
 
         const lc = {}
@@ -67,15 +71,18 @@ export default function ArtistDashboardPage() {
         setRatingCounts(counts)
 
         setRecentComments((comments.data || []).map(c => ({ ...c, songTitle: songTitles[c.song_id] })))
+        if (!purchasesRes.error) setSongPurchases(purchasesRes.data || [])
       }
 
-      // Contest entries — optional table, silently ignore if it doesn't exist
+      // Contest entries (artist_id column)
       const entriesRes = await supabase
         .from('contest_entries')
-        .select('id, contests(id, title, status)')
-        .eq('user_id', user.id)
+        .select('id, contest_id, contests(id, title, status)')
+        .eq('artist_id', user.id)
         .limit(5)
-      if (!entriesRes.error) setContestEntries(entriesRes.data?.map(e => e.contests).filter(Boolean) || [])
+      if (!entriesRes.error) {
+        setContestEntries(entriesRes.data?.map(e => e.contests).filter(Boolean) || [])
+      }
 
       setLoading(false)
     }
@@ -96,12 +103,25 @@ export default function ArtistDashboardPage() {
     setVideos(prev => prev.filter(v => v.id !== id))
   }
 
-  const totalPlays   = songs.reduce((sum, s) => sum + (s.play_count || 0), 0)
-  const totalLikes   = Object.values(likeCounts).reduce((a, b) => a + b, 0)
+  const totalPlays    = songs.reduce((sum, s) => sum + (s.play_count || 0), 0)
+  const totalLikes    = Object.values(likeCounts).reduce((a, b) => a + b, 0)
   const approvedCount = songs.filter(s => s.status === 'approved').length
   const pendingCount  = songs.filter(s => s.status === 'pending').length
   const rejectedCount = songs.filter(s => s.status === 'rejected').length
-  const maxPlays = Math.max(...songs.map(s => s.play_count || 0), 1)
+  const maxPlays      = Math.max(...songs.map(s => s.play_count || 0), 1)
+
+  const totalRevenue = songPurchases.reduce((sum, p) => sum + Number(p.amount || 0), 0)
+  const totalSales   = songPurchases.length
+  const purchasesBySong = songs.reduce((acc, s) => {
+    const ps = songPurchases.filter(p => p.song_id === s.id)
+    if (ps.length > 0) acc.push({
+      id: s.id,
+      title: s.title,
+      count: ps.length,
+      revenue: ps.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+    })
+    return acc
+  }, []).sort((a, b) => b.revenue - a.revenue)
 
   return (
     <div className="page">
@@ -117,7 +137,7 @@ export default function ArtistDashboardPage() {
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <Link to="/upload/song" className="btn btn-primary btn-sm">+ Upload Song</Link>
           <Link to="/upload/video" className="btn btn-outline btn-sm">+ Upload Video</Link>
-          <Link to="/contests" className="btn btn-outline btn-sm">🏆 Enter Contest</Link>
+          <Link to="/contests" className="btn btn-outline btn-sm">🏆 Contests</Link>
         </div>
       </div>
 
@@ -307,6 +327,44 @@ export default function ArtistDashboardPage() {
                 )}
               </div>
 
+              {/* Sales & Earnings */}
+              <div className="card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <h3>💰 Sales & Earnings</h3>
+                  <span className="badge badge-pending" style={{ fontSize: '0.75rem' }}>Stripe Payouts Coming Soon</span>
+                </div>
+                <div className="stats-row" style={{ marginBottom: '1.25rem' }}>
+                  <div className="stat-card">
+                    <div className="stat-value" style={{ color: 'var(--success)' }}>${totalRevenue.toFixed(2)}</div>
+                    <div className="stat-label">Total Revenue</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{totalSales}</div>
+                    <div className="stat-label">Sales</div>
+                  </div>
+                </div>
+                {purchasesBySong.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                    No sales yet. Set a price on your songs to start earning.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+                    {purchasesBySong.map(p => (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.625rem 0.875rem', background: 'var(--surface-2)', borderRadius: 8 }}>
+                        <span style={{ fontWeight: 500, color: 'var(--text-h)', fontSize: '0.875rem' }}>{p.title}</span>
+                        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.875rem' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{p.count} sale{p.count !== 1 ? 's' : ''}</span>
+                          <span style={{ color: 'var(--success)', fontWeight: 600 }}>${p.revenue.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ padding: '0.75rem 1rem', background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  💳 Stripe Connect payouts are coming soon. Your earnings are being tracked and will be paid out when the system launches.
+                </div>
+              </div>
+
               {/* Recent Comments */}
               <div className="card">
                 <h3 style={{ marginBottom: '1rem' }}>💬 Recent Comments</h3>
@@ -330,16 +388,6 @@ export default function ArtistDashboardPage() {
                 )}
               </div>
 
-              {/* Revenue placeholder */}
-              <div className="card" style={{ textAlign: 'center', padding: '2.5rem 2rem' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>💰</div>
-                <h3 style={{ marginBottom: '0.5rem' }}>Revenue Tracking</h3>
-                <p style={{ color: 'var(--text)', fontSize: '0.9rem', maxWidth: 380, margin: '0 auto 1rem' }}>
-                  Monetization and revenue analytics are coming soon. Set a price on your songs now to be ready when it launches.
-                </p>
-                <span className="badge badge-pending">Coming Soon</span>
-              </div>
-
               {/* Contest Entries */}
               <div className="card">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -353,9 +401,12 @@ export default function ArtistDashboardPage() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {contestEntries.map((c, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.625rem 0.875rem', background: 'var(--surface-2)', borderRadius: 8 }}>
+                      <div key={c?.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.625rem 0.875rem', background: 'var(--surface-2)', borderRadius: 8 }}>
                         <span style={{ fontWeight: 500, color: 'var(--text-h)', fontSize: '0.9rem' }}>{c.title}</span>
-                        <span className={`badge ${c.status === 'active' ? 'badge-active' : 'badge-pending'}`}>{c.status}</span>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <span className={`badge ${c.status === 'active' ? 'badge-active' : 'badge-pending'}`}>{c.status}</span>
+                          {c.id && <Link to={`/contest/${c.id}`} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>View →</Link>}
+                        </div>
                       </div>
                     ))}
                   </div>

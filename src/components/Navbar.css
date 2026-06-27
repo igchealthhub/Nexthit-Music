@@ -119,6 +119,42 @@
 
 .nav-admin-link { color: var(--accent-2) !important; }
 
+/* Notification bell */
+.nav-notif-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 1rem;
+  color: var(--text) !important;
+  text-decoration: none;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.nav-notif-btn:hover { background: var(--surface-2) !important; color: var(--text-h) !important; }
+
+.notif-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--accent-2);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
+}
+
 .navbar-toggle {
   display: none;
   flex-direction: column;

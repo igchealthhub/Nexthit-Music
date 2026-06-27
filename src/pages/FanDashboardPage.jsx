@@ -3,11 +3,18 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
+const NOTIF_ICONS = {
+  song_approved: '✅', song_rejected: '❌', song_purchased: '💰',
+  new_follower: '👥', new_comment: '💬', general: '🔔',
+}
+
 export default function FanDashboardPage() {
   const { user, profile } = useAuth()
   const [likedSongs, setLikedSongs] = useState([])
   const [recentPlays, setRecentPlays] = useState([])
   const [followedArtists, setFollowedArtists] = useState([])
+  const [purchases, setPurchases] = useState([])
+  const [notifications, setNotifications] = useState([])
   const [playlists, setPlaylists] = useState([])
   const [contestEntries, setContestEntries] = useState([])
   const [points, setPoints] = useState(null)
@@ -19,8 +26,7 @@ export default function FanDashboardPage() {
 
   useEffect(() => {
     async function load() {
-      // Core queries — tables confirmed to exist
-      const [likesRes, playsRes, recommendedRes] = await Promise.all([
+      const [likesRes, playsRes, recommendedRes, purchasesRes, notifRes] = await Promise.all([
         supabase.from('likes')
           .select('song_id, songs(id, title, cover_url, play_count)')
           .eq('user_id', user.id)
@@ -36,21 +42,34 @@ export default function FanDashboardPage() {
           .eq('status', 'approved')
           .order('play_count', { ascending: false })
           .limit(8),
+        supabase.from('purchases')
+          .select('song_id, created_at, songs(id, title, cover_url, play_count)')
+          .eq('buyer_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(8),
+        supabase.from('notifications')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('read', false)
+          .order('created_at', { ascending: false })
+          .limit(5),
       ])
 
       setLikedSongs(likesRes.data?.map(l => l.songs).filter(Boolean) || [])
       setRecentPlays(playsRes.data?.filter(p => p.songs) || [])
       setRecommended(recommendedRes.data || [])
+      if (!purchasesRes.error) setPurchases(purchasesRes.data || [])
+      if (!notifRes.error) setNotifications(notifRes.data || [])
 
-      // Follows — two-step to avoid ambiguous FK (both follower_id and artist_id point to profiles)
+      // Follows — two-step to avoid ambiguous FK
       const followsRes = await supabase.from('follows').select('artist_id').eq('follower_id', user.id)
       if (!followsRes.error && followsRes.data?.length) {
         const artistIds = followsRes.data.map(f => f.artist_id)
-        const artistRes = await supabase.from('profiles').select('id, display_name, email').in('id', artistIds)
+        const artistRes = await supabase.from('profiles').select('id, display_name, email, avatar_url').in('id', artistIds)
         setFollowedArtists(artistRes.data || [])
       }
 
-      // Optional tables — silently ignore errors if tables don't exist yet
+      // Optional tables
       const [playlistsRes, pointsRes, entriesRes, badgesRes] = await Promise.all([
         supabase.from('playlists').select('id, name').eq('user_id', user.id).limit(10),
         supabase.from('fan_points').select('points').eq('user_id', user.id).maybeSingle(),
@@ -68,7 +87,14 @@ export default function FanDashboardPage() {
     load()
   }, [user.id])
 
+  async function markNotifRead(id) {
+    await supabase.from('notifications').update({ read: true }).eq('id', id)
+    setNotifications(prev => prev.filter(n => n.id !== id))
+  }
+
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>
+
+  const purchasedSongs = purchases.map(p => p.songs).filter(Boolean)
 
   return (
     <div className="page">
@@ -96,6 +122,10 @@ export default function FanDashboardPage() {
           <div className="stat-label">Liked Songs</div>
         </div>
         <div className="stat-card">
+          <div className="stat-value" style={{ color: 'var(--accent-2)' }}>{purchasedSongs.length}</div>
+          <div className="stat-label">Purchased</div>
+        </div>
+        <div className="stat-card">
           <div className="stat-value" style={{ color: 'var(--accent)' }}>{followedArtists.length}</div>
           <div className="stat-label">Following</div>
         </div>
@@ -107,11 +137,49 @@ export default function FanDashboardPage() {
           <div className="stat-value" style={{ color: '#fbbf24' }}>{points ?? 0}</div>
           <div className="stat-label">Fan Points</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-value">{badges.length}</div>
-          <div className="stat-label">Badges</div>
-        </div>
       </div>
+
+      {/* Notifications */}
+      {notifications.length > 0 && (
+        <div className="section">
+          <div className="section-header">
+            <h2>🔔 Notifications <span className="notif-badge" style={{ position: 'static', display: 'inline-flex', marginLeft: '0.375rem', background: 'var(--accent-2)', color: '#fff', fontSize: '0.7rem', padding: '0 5px', height: 18, borderRadius: 9, alignItems: 'center' }}>{notifications.length}</span></h2>
+            <Link to="/notifications" className="btn btn-ghost btn-sm">View all →</Link>
+          </div>
+          <div className="card" style={{ padding: 0 }}>
+            {notifications.map(n => (
+              <div key={n.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '0.875rem 1rem', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--accent-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1rem' }}>
+                  {NOTIF_ICONS[n.type] || '🔔'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: 'var(--text-h)', fontSize: '0.875rem' }}>{n.title}</div>
+                  {n.body && <div style={{ fontSize: '0.8rem', color: 'var(--text)', marginTop: '0.125rem' }}>{n.body}</div>}
+                </div>
+                <button
+                  onClick={() => markNotifRead(n.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.75rem', padding: '0.25rem 0', flexShrink: 0, whiteSpace: 'nowrap' }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Purchased Songs */}
+      {purchasedSongs.length > 0 && (
+        <div className="section">
+          <div className="section-header">
+            <h2>🛒 Purchased Songs</h2>
+            <Link to="/songs" className="btn btn-ghost btn-sm">Browse more →</Link>
+          </div>
+          <div className="grid-4">
+            {purchasedSongs.map(s => <SongCard key={s.id} song={s} />)}
+          </div>
+        </div>
+      )}
 
       {/* Liked Songs */}
       <div className="section">
@@ -162,12 +230,16 @@ export default function FanDashboardPage() {
         ) : (
           <div className="grid-4">
             {followedArtists.map(a => (
-              <div key={a.id} className="card card-sm" style={{ textAlign: 'center' }}>
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', margin: '0 auto 0.5rem' }}>🎤</div>
-                <div style={{ fontWeight: 600, color: 'var(--text-h)', fontSize: '0.875rem' }}>
-                  {a.display_name || a.email?.split('@')[0]}
+              <Link key={a.id} to={`/artist/${a.id}`} style={{ textDecoration: 'none' }}>
+                <div className="card card-sm" style={{ textAlign: 'center', cursor: 'pointer', transition: 'border-color 0.15s' }}>
+                  <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', margin: '0 auto 0.5rem', overflow: 'hidden' }}>
+                    {a.avatar_url ? <img src={a.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} /> : '🎤'}
+                  </div>
+                  <div style={{ fontWeight: 600, color: 'var(--text-h)', fontSize: '0.875rem' }}>
+                    {a.display_name || a.email?.split('@')[0]}
+                  </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
@@ -198,17 +270,19 @@ export default function FanDashboardPage() {
             <h2>🏆 Contest Entries</h2>
           </div>
           {contestEntries.length === 0 ? (
-            <DashEmpty icon="🏆" title="No entries yet" sub={<><Link to="/contests">Enter a contest</Link> to get started.</>} />
+            <DashEmpty icon="🏆" title="No entries yet" sub={<><Link to="/contests">Browse contests</Link> to vote and enter.</>} />
           ) : (
             <div className="card" style={{ padding: 0 }}>
               {contestEntries.map((c, i) => (
-                <div key={i} className="list-row">
-                  <div className="list-thumb" style={{ background: 'var(--surface-3)' }}>🏆</div>
-                  <div className="list-info">
-                    <div className="list-title">{c.title}</div>
-                    <div className="list-sub">{c.status}</div>
+                <Link key={i} to={`/contest/${c.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                  <div className="list-row">
+                    <div className="list-thumb" style={{ background: 'var(--surface-3)' }}>🏆</div>
+                    <div className="list-info">
+                      <div className="list-title">{c.title}</div>
+                      <div className="list-sub">{c.status}</div>
+                    </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -229,15 +303,6 @@ export default function FanDashboardPage() {
           </div>
         </div>
       )}
-
-      {/* Notifications placeholder */}
-      <div className="section">
-        <div className="section-header"><h2>🔔 Notifications</h2></div>
-        <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔔</div>
-          <p>Notifications are coming soon. You'll be alerted when songs get approved, artists you follow release music, and more.</p>
-        </div>
-      </div>
 
       {/* Recommended */}
       <div className="section">
