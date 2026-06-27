@@ -60,13 +60,19 @@ export default function UploadSongPage() {
   }
 
   async function uploadFile(bucket, path, file) {
-    const { error } = await supabase.storage.from(bucket).upload(path, file, {
+    const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
       cacheControl: '3600',
       upsert: false,
     })
-    if (error) throw new Error(`Storage upload failed (${bucket}): ${error.message}`)
-    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path)
-    return publicUrl
+
+    console.log(`[UploadSong] Storage upload result for ${bucket}`, { bucket, path, data, error })
+
+    if (error) {
+      throw new Error(`Storage upload failed (${bucket}): ${error.message}`)
+    }
+
+    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path)
+    return urlData.publicUrl
   }
 
   async function handleSubmit(e) {
@@ -83,15 +89,19 @@ export default function UploadSongPage() {
 
       // Upload audio
       setProgress('Uploading audio…')
-      const audioPath = `${user.id}/${timestamp}-${safeTitle}.${audioFile.name.split('.').pop()}`
+      const audioExtension = audioFile.name.split('.').pop()?.toLowerCase() || 'mp3'
+      const audioPath = `${user.id}/${timestamp}-${safeTitle}.${audioExtension}`
       const audioUrl = await uploadFile('song-files', audioPath, audioFile)
+      console.log('[UploadSong] Audio uploaded', { audioPath, audioUrl })
 
       // Upload cover (optional)
       let coverUrl = null
       if (coverFile) {
         setProgress('Uploading cover art…')
-        const coverPath = `${user.id}/${timestamp}-${safeTitle}.${coverFile.name.split('.').pop()}`
+        const coverExtension = coverFile.name.split('.').pop()?.toLowerCase() || 'jpg'
+        const coverPath = `${user.id}/${timestamp}-${safeTitle}.${coverExtension}`
         coverUrl = await uploadFile('cover-art', coverPath, coverFile)
+        console.log('[UploadSong] Cover uploaded', { coverPath, coverUrl })
       }
 
       // Insert song row
@@ -100,20 +110,16 @@ export default function UploadSongPage() {
         artist_id: user.id,
         title: form.title.trim(),
         description: form.description.trim() || null,
+        genre_id: form.genre_id || null,
         audio_url: audioUrl,
-        cover_url: coverUrl,   // confirmed column name from schema probe
+        cover_url: coverUrl,
+        price: form.price ? parseFloat(form.price) : 0,
         status: 'pending',
         play_count: 0,
       }
-      // Only include genre_id when it came from the real DB (genres array populated).
-      // Fallback genres use fake numeric IDs that would violate the UUID FK constraint.
-      if (form.genre_id && genres.length > 0) songRow.genre_id = form.genre_id
-      if (form.price) songRow.price = parseFloat(form.price)
 
       console.log('[UploadSong] Inserting row:', songRow)
 
-      // Use .select() so we get back the created row and can confirm the insert worked.
-      // Without .select(), a silent RLS failure can return {data: null, error: null}.
       const { data: inserted, error: insertError } = await supabase
         .from('songs')
         .insert(songRow)
@@ -129,9 +135,10 @@ export default function UploadSongPage() {
         throw new Error('Insert returned no data. The songs RLS INSERT policy may be missing — run the SQL policies in Supabase.')
       }
 
-      console.log('[UploadSong] Row created successfully:', inserted.id)
+      console.log('[UploadSong] Row created successfully:', inserted)
       setSuccess(true)
     } catch (err) {
+      console.error('[UploadSong] Error', err)
       setError(err.message)
     } finally {
       setUploading(false)
