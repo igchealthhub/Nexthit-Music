@@ -92,11 +92,24 @@ test.describe('Daily health check', () => {
     await page.goto('/songs', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('h1')).toContainText('Songs')
 
-    const noApprovedSongs = page.getByText(/No approved songs yet/i)
-    if (await noApprovedSongs.isVisible().catch(() => false)) {
-      await expect(noApprovedSongs).toBeVisible()
+    const noApprovedSongsHeading = page.getByRole('heading', { name: /No approved songs yet/i })
+    const playButtons = page.locator('.sp-play-btn')
+
+    await expect
+      .poll(async () => {
+        const noApprovedVisible = await noApprovedSongsHeading.first().isVisible().catch(() => false)
+        const playButtonCount = await playButtons.count()
+        return noApprovedVisible || playButtonCount > 0
+      }, { timeout: 15_000 })
+      .toBe(true)
+
+    const noApprovedVisible = await noApprovedSongsHeading.first().isVisible().catch(() => false)
+
+    if (noApprovedVisible) {
+      await expect(noApprovedSongsHeading).toBeVisible()
     } else {
-      await expect(page.locator('.sp-play-btn').first()).toBeVisible()
+      const playButtonCount = await playButtons.count()
+      expect(playButtonCount).toBeGreaterThan(0)
     }
 
     await page.goto('/contests', { waitUntil: 'domcontentloaded' })
