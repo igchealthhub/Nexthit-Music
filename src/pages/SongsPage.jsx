@@ -29,6 +29,23 @@ export default function SongsPage() {
 
   useEffect(() => { loadAll() }, [user])
 
+  function isFullUrl(value) {
+    return typeof value === 'string' && /^https?:\/\//i.test(value)
+  }
+
+  async function resolveStorageUrl(value, bucket) {
+    if (!value) return null
+    if (isFullUrl(value)) return value
+    const path = value.startsWith('/') ? value.slice(1) : value
+    const { data, error } = supabase.storage.from(bucket).getPublicUrl(path)
+    console.log('RESOLVE STORAGE URL', { bucket, value, path, data, error })
+    if (error || !data?.publicUrl) {
+      console.warn('Unable to resolve public URL for', { bucket, path, error })
+      return value
+    }
+    return data.publicUrl
+  }
+
   async function loadAll() {
     setLoading(true)
     setSongsError('')
@@ -50,8 +67,15 @@ export default function SongsPage() {
       return
     }
 
-    setRawSongsData(songData ?? [])
-    setSongs(songData ?? [])
+    const enrichedSongs = await Promise.all((songData ?? []).map(async song => {
+      const playable_audio_url = await resolveStorageUrl(song.audio_url, 'song-files')
+      const playable_cover_url = await resolveStorageUrl(song.cover_url, 'cover-art')
+      console.log('SONG URL RESOLVE', { title: song.title, audio_url: song.audio_url, playable_audio_url, cover_url: song.cover_url, playable_cover_url })
+      return { ...song, playable_audio_url, playable_cover_url }
+    }))
+
+    setRawSongsData(enrichedSongs)
+    setSongs(enrichedSongs)
 
     const ids = songData.map(s => s.id)
 
@@ -373,15 +397,22 @@ function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRa
   const genreName = song.genres?.name || null
   const artistProfile = song.profiles
   const title = song.title || 'Untitled'
-  const audioSrc = song.audio_url || ''
+  const rawAudioUrl = song.audio_url || ''
+  const audioSrc = song.playable_audio_url || rawAudioUrl
+  const rawCoverUrl = song.cover_url || ''
+  const coverSrc = song.playable_cover_url || rawCoverUrl
   const priceValue = Number(song.price || 0)
   const displayPrice = priceValue > 0 ? priceValue.toFixed(2) : null
+
+  useEffect(() => {
+    console.log('SONG PLAYBACK', { title, rawAudioUrl, resolvedPlayableUrl: audioSrc })
+  }, [title, rawAudioUrl, audioSrc])
 
   return (
     <div className={`song-card ${isActive ? 'active' : ''}`}>
       <div className="song-card-cover">
-        {song.cover_url
-          ? <img src={song.cover_url} alt={title} />
+        {coverSrc
+          ? <img src={coverSrc} alt={title} />
           : <span className="song-card-cover-placeholder">🎵</span>}
       </div>
 
@@ -409,7 +440,7 @@ function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRa
           </div>
         </div>
 
-        <SnippetPlayer src={song.audio_url} songId={song.id} onPlayStart={onPlay} fullAccess={fullAccess} />
+        <SnippetPlayer src={audioSrc} songId={song.id} onPlayStart={onPlay} fullAccess={fullAccess} />
 
         <div className="song-card-actions">
           <button

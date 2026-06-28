@@ -9,6 +9,7 @@ export default function SnippetPlayer({ src, songId, onPlayStart, fullAccess }) 
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [previewEnded, setPreviewEnded] = useState(false)
+  const [audioError, setAudioError] = useState(null)
 
   useEffect(() => {
     return () => audioRef.current?.pause()
@@ -34,9 +35,15 @@ export default function SnippetPlayer({ src, songId, onPlayStart, fullAccess }) 
       setPreviewEnded(false)
       setCurrentTime(0)
     }
-    audio.play().catch(() => {})
-    setPlaying(true)
-    onPlayStart?.()
+    setAudioError(null)
+    audio.play().then(() => {
+      setPlaying(true)
+      onPlayStart?.()
+    }).catch(error => {
+      console.error('AUDIO PLAY ERROR', { songId, src, error })
+      setAudioError('Audio file could not be loaded.')
+      setPlaying(false)
+    })
   }
 
   function handleTimeUpdate() {
@@ -61,6 +68,13 @@ export default function SnippetPlayer({ src, songId, onPlayStart, fullAccess }) 
     setCurrentTime(0)
   }
 
+  function handleAudioError(event) {
+    const error = event?.target?.error
+    console.error('AUDIO LOAD ERROR', { songId, src, error })
+    setAudioError('Audio file could not be loaded.')
+    setPlaying(false)
+  }
+
   const limit = fullAccess ? (duration || PREVIEW_LIMIT) : PREVIEW_LIMIT
   const pct = Math.min((currentTime / limit) * 100, 100)
 
@@ -76,6 +90,7 @@ export default function SnippetPlayer({ src, songId, onPlayStart, fullAccess }) 
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
+        onError={handleAudioError}
         preload="none"
       />
 
@@ -108,6 +123,12 @@ export default function SnippetPlayer({ src, songId, onPlayStart, fullAccess }) 
         {!fullAccess && previewEnded && (
           <div className="sp-upsell">
             Preview ended. Buy the full song to keep listening.
+          </div>
+        )}
+
+        {audioError && (
+          <div className="sp-error" style={{ color: 'var(--error)', marginTop: '0.5rem', fontSize: '0.875rem' }}>
+            {audioError}
           </div>
         )}
       </div>

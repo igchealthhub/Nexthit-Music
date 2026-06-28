@@ -14,6 +14,7 @@ import VideosPage from './pages/VideosPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import ContestsPage from './pages/ContestsPage'
 import UploadSongPage from './pages/UploadSongPage'
+import UploadSongSuccessPage from './pages/UploadSongSuccessPage'
 import UploadVideoPage from './pages/UploadVideoPage'
 import ArtistDashboardPage from './pages/ArtistDashboardPage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
@@ -57,6 +58,9 @@ export default function App() {
               } />
               <Route path="/artist-dashboard" element={
                 <ProtectedRoute roles={['artist']}><ArtistDashboardPage /></ProtectedRoute>
+              } />
+              <Route path="/upload/song/success" element={
+                <ProtectedRoute roles={['artist']}><UploadSongSuccessPage /></ProtectedRoute>
               } />
               <Route path="/admin" element={
                 <ProtectedRoute adminOnly><AdminDashboardPage /></ProtectedRoute>
