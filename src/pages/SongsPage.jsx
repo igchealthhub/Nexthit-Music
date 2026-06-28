@@ -9,6 +9,8 @@ export default function SongsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [songs, setSongs] = useState([])
+  const [songsError, setSongsError] = useState('')
+  const [rawSongsData, setRawSongsData] = useState(null)
   const [likeCounts, setLikeCounts] = useState({})
   const [ratingAvgs, setRatingAvgs] = useState({})
   const [ratingCounts, setRatingCounts] = useState({})
@@ -29,15 +31,27 @@ export default function SongsPage() {
 
   async function loadAll() {
     setLoading(true)
+    setSongsError('')
+    setRawSongsData(null)
 
-    const { data: songData } = await supabase
+    const { data: songData, error } = await supabase
       .from('songs')
-      .select('*, genres(name), profiles!artist_id(id, display_name, verified)')
+      .select('*')
       .eq('status', 'approved')
-      .order('play_count', { ascending: false })
+      .order('created_at', { ascending: false })
 
-    if (!songData?.length) { setSongs([]); setLoading(false); return }
-    setSongs(songData)
+    console.log('SONGS QUERY RESULT:', songData)
+    console.log('SONGS QUERY ERROR:', error)
+
+    if (error) {
+      setSongs([])
+      setSongsError(error.message)
+      setLoading(false)
+      return
+    }
+
+    setRawSongsData(songData ?? [])
+    setSongs(songData ?? [])
 
     const ids = songData.map(s => s.id)
 
@@ -187,6 +201,8 @@ export default function SongsPage() {
     setPurchasing(false)
   }
 
+  const approvedSongs = songs.filter(song => String(song.status || '').trim().toLowerCase() === 'approved')
+
   return (
     <div className="page">
       <div className="page-header">
@@ -196,15 +212,32 @@ export default function SongsPage() {
 
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
-      ) : songs.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">🎵</div>
-          <h3>No songs yet</h3>
-          <p>Approved tracks will appear here.</p>
+      ) : songsError ? (
+        <div className="alert alert-error" style={{ marginBottom: '1.5rem', fontFamily: 'monospace', fontSize: '0.95rem' }}>
+          <strong>SONGS ERROR:</strong> {songsError}
+        </div>
+      ) : approvedSongs.length === 0 ? (
+        <div>
+          <div className="empty-state">
+            <div className="empty-icon">🎵</div>
+            <h3>No approved songs yet</h3>
+            <p>Only songs with <code>status = 'approved'</code> will appear here.</p>
+            <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>
+              Loaded songs: {songs.length}, approved songs: {approvedSongs.length}
+            </p>
+          </div>
+          {rawSongsData && (
+            <div className="alert alert-info" style={{ marginTop: '1.5rem', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+              <strong>Raw songs response:</strong>
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '320px', overflow: 'auto' }}>
+                {JSON.stringify(rawSongsData, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
       ) : (
         <div className="songs-grid">
-          {songs.map(song => {
+          {approvedSongs.map(song => {
             const purchased = userPurchases.has(song.id)
             const isFree = !song.price || song.price <= 0
             const hasFullAccess = purchased || isFree
@@ -339,19 +372,23 @@ export default function SongsPage() {
 function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRating, commentCount, purchased, isFree, fullAccess, isActive, onPlay, onLike, onRate, onComment, onBuy }) {
   const genreName = song.genres?.name || null
   const artistProfile = song.profiles
+  const title = song.title || 'Untitled'
+  const audioSrc = song.audio_url || ''
+  const priceValue = Number(song.price || 0)
+  const displayPrice = priceValue > 0 ? priceValue.toFixed(2) : null
 
   return (
     <div className={`song-card ${isActive ? 'active' : ''}`}>
       <div className="song-card-cover">
         {song.cover_url
-          ? <img src={song.cover_url} alt={song.title} />
+          ? <img src={song.cover_url} alt={title} />
           : <span className="song-card-cover-placeholder">🎵</span>}
       </div>
 
       <div className="song-card-body">
         <div className="song-card-top">
           <div>
-            <div className="song-card-title">{song.title}</div>
+            <div className="song-card-title">{title}</div>
             <div className="song-card-meta">
               {artistProfile && (
                 <Link to={`/artist/${artistProfile.id}`} style={{ color: 'var(--accent)', fontSize: '0.8rem', fontWeight: 500, textDecoration: 'none' }}>

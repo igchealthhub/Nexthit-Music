@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
 const STATUS_MAP = {
@@ -13,35 +14,70 @@ const STATUS_MAP = {
 }
 
 export default function AdminDashboardPage() {
+  const { user, profile } = useAuth()
   const [tab, setTab] = useState('pending')
   const [songs, setSongs] = useState([])
+  const [pendingSongs, setPendingSongs] = useState([])
   const [videos, setVideos] = useState([])
+  const [pendingVideos, setPendingVideos] = useState([])
   const [users, setUsers] = useState([])
   const [contests, setContests] = useState([])
   const [userStats, setUserStats] = useState({ total: 0, artists: 0, fans: 0, admins: 0 })
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState('')
+  const [debugInfo, setDebugInfo] = useState(null)
 
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
     setLoading(true)
     setFetchError('')
+    setDebugInfo(null)
 
-    const [s, v, p, c] = await Promise.all([
-      supabase.from('songs').select('*, genres(name)').order('created_at', { ascending: false }),
+    const statusFilter = 'pending'
+    const sessionResult = await supabase.auth.getSession()
+    const sessionUserId = sessionResult.data?.session?.user?.id
+    const sessionError = sessionResult.error
+
+    console.log('[AdminDashboard] auth session check', {
+      authUserId: user?.id,
+      profileIsAdmin: profile?.is_admin,
+      sessionUserId,
+      sessionError,
+    })
+
+    const [s, v, p, c, pendingSongRes, pendingVideoRes] = await Promise.all([
+      supabase.from('songs').select('*').order('created_at', { ascending: false }),
       supabase.from('videos').select('*').order('created_at', { ascending: false }),
       supabase.from('profiles').select('id, display_name, email, role, is_admin, verified, created_at').order('created_at', { ascending: false }),
       supabase.from('contests').select('*').order('created_at', { ascending: false }),
+      supabase.from('songs').select('*').eq('status', statusFilter).order('created_at', { ascending: false }),
+      supabase.from('videos').select('*').eq('status', statusFilter).order('created_at', { ascending: false }),
     ])
 
     const errors = []
-    if (s.error) errors.push(`Songs: ${s.error.message} (code: ${s.error.code})`)
-    if (v.error) errors.push(`Videos: ${v.error.message} (code: ${v.error.code})`)
+    if (s.error) {
+      console.error('[AdminDashboard] songs query failed', { query: "supabase.from('songs').select('*').order('created_at', { ascending: false })", error: s.error })
+      errors.push(`Songs: ${s.error.message} (code: ${s.error.code})`)
+    }
+    if (v.error) {
+      console.error('[AdminDashboard] videos query failed', { query: "supabase.from('videos').select('*').order('created_at', { ascending: false })", error: v.error })
+      errors.push(`Videos: ${v.error.message} (code: ${v.error.code})`)
+    }
+    if (pendingSongRes.error) {
+      console.error('[AdminDashboard] pending songs query failed', { query: "supabase.from('songs').select('*').eq('status', statusFilter).order('created_at', { ascending: false })", error: pendingSongRes.error })
+      errors.push(`Pending songs: ${pendingSongRes.error.message} (code: ${pendingSongRes.error.code})`)
+    }
+    if (pendingVideoRes.error) {
+      console.error('[AdminDashboard] pending videos query failed', { query: "supabase.from('videos').select('*').eq('status', statusFilter).order('created_at', { ascending: false })", error: pendingVideoRes.error })
+      errors.push(`Pending videos: ${pendingVideoRes.error.message} (code: ${pendingVideoRes.error.code})`)
+    }
     if (errors.length) setFetchError(errors.join(' | '))
 
     setSongs(s.data ?? [])
+    setPendingSongs(pendingSongRes.data ?? [])
     setVideos(v.data ?? [])
+    setPendingVideos(pendingVideoRes.data ?? [])
 
     const allUsers = p.data ?? []
     setUsers(allUsers)
@@ -53,13 +89,73 @@ export default function AdminDashboardPage() {
     })
 
     setContests(c.data ?? [])
+    setDebugInfo({
+      statusFilter,
+      authUserId: user?.id ?? null,
+      profileIsAdmin: profile?.is_admin ?? null,
+      sessionUserId,
+      sessionError: sessionError?.message ?? null,
+      pendingQueryRows: pendingSongRes.data?.length ?? 0,
+      pendingQueryError: pendingSongRes.error?.message ?? null,
+      pendingQueryResult: pendingSongRes.data ?? null,
+    })
+
     setLoading(false)
   }
 
+  async function loadPendingSongs() {
+    setFetchError('')
+    const statusFilter = 'pending'
+    const sessionResult = await supabase.auth.getSession()
+    const sessionUserId = sessionResult.data?.session?.user?.id
+    const sessionError = sessionResult.error
+
+    const pendingRes = await supabase
+      .from('songs')
+      .select('*, genres(name)')
+      .eq('status', statusFilter)
+      .order('created_at', { ascending: false })
+
+    const errorMessage = pendingRes.error
+      ? `Pending songs: ${pendingRes.error.message} (code: ${pendingRes.error.code})`
+      : ''
+
+    if (errorMessage) setFetchError(prev => prev ? `${prev} | ${errorMessage}` : errorMessage)
+    setPendingSongs(pendingRes.data ?? [])
+
+    setDebugInfo({
+      statusFilter,
+      authUserId: user?.id ?? null,
+      profileIsAdmin: profile?.is_admin ?? null,
+      sessionUserId,
+      sessionError: sessionError?.message ?? null,
+      pendingQueryRows: pendingRes.data?.length ?? 0,
+      pendingQueryError: pendingRes.error?.message ?? null,
+      pendingQueryResult: pendingRes.data ?? null,
+    })
+  }
+
   async function updateSongStatus(id, status) {
-    const { error } = await supabase.from('songs').update({ status }).eq('id', id)
-    if (error) { alert(`Update failed: ${error.message}`); return }
-    setSongs(prev => prev.map(s => s.id === id ? { ...s, status } : s))
+    const { data, error } = await supabase
+      .from('songs')
+      .update({ status })
+      .eq('id', id)
+      .select()
+
+    console.log('UPDATE RESULT:', data)
+    console.log('UPDATE ERROR:', error)
+
+    if (error) {
+      alert(`Update failed: ${error.message}`)
+      return
+    }
+
+    if (!data || !data.length) {
+      alert('No song was updated.')
+      return
+    }
+
+    await loadAll()
   }
 
   async function updateVideoStatus(id, status) {
@@ -87,10 +183,10 @@ export default function AdminDashboardPage() {
     setState(prev => prev.filter(x => x.id !== id))
   }
 
-  const pending       = songs.filter(s => s.status === 'pending')
+  const pending       = pendingSongs
   const approved      = songs.filter(s => s.status === 'approved')
   const rejected      = songs.filter(s => s.status === 'rejected')
-  const pendingVideos = videos.filter(v => v.status === 'pending')
+  const pendingVideoItems = videos.filter(v => v.status === 'pending')
   const totalPlays    = songs.reduce((sum, s) => sum + (s.play_count || 0), 0)
 
   const tabSongs =
@@ -118,6 +214,19 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
+      {debugInfo && (
+        <div className="alert alert-info" style={{ marginBottom: '1.5rem', fontFamily: 'monospace', fontSize: '0.875rem' }}>
+          <strong>Admin debug:</strong><br />
+          statusFilter = <code>{debugInfo.statusFilter}</code><br />
+          authUserId = <code>{debugInfo.authUserId ?? 'null'}</code><br />
+          profile.is_admin = <code>{String(debugInfo.profileIsAdmin)}</code><br />
+          sessionUserId = <code>{debugInfo.sessionUserId ?? 'null'}</code><br />
+          sessionError = <code>{debugInfo.sessionError ?? 'none'}</code><br />
+          pendingQueryRows = <code>{debugInfo.pendingQueryRows}</code><br />
+          pendingQueryError = <code>{debugInfo.pendingQueryError ?? 'none'}</code>
+        </div>
+      )}
+
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
       ) : (
@@ -128,8 +237,8 @@ export default function AdminDashboardPage() {
               <div className="stat-value" style={{ color: pending.length ? 'var(--warning)' : 'var(--text-h)' }}>{pending.length}</div>
               <div className="stat-label">Pending Songs</div>
             </div>
-            <div className="stat-card" style={{ borderColor: pendingVideos.length ? 'var(--warning)' : 'var(--border)' }}>
-              <div className="stat-value" style={{ color: pendingVideos.length ? 'var(--warning)' : 'var(--text-h)' }}>{pendingVideos.length}</div>
+            <div className="stat-card" style={{ borderColor: pendingVideoItems.length ? 'var(--warning)' : 'var(--border)' }}>
+              <div className="stat-value" style={{ color: pendingVideoItems.length ? 'var(--warning)' : 'var(--text-h)' }}>{pendingVideoItems.length}</div>
               <div className="stat-label">Pending Videos</div>
             </div>
             <div className="stat-card">
@@ -186,7 +295,8 @@ export default function AdminDashboardPage() {
                 onClick={() => setTab(t.key)}
               >{t.label}</button>
             ))}
-            <button className="btn btn-sm btn-ghost" onClick={loadAll} style={{ marginLeft: 'auto' }}>↺ Refresh</button>
+            <button className="btn btn-sm btn-ghost" onClick={loadAll}>↺ Refresh</button>
+            <button className="btn btn-sm btn-ghost" onClick={loadPendingSongs}>🧪 Refresh Pending</button>
           </div>
 
           {/* Song tabs */}

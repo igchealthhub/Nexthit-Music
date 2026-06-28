@@ -9,7 +9,7 @@ const FALLBACK_GENRES = [
 ]
 
 export default function UploadSongPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
 
   const [genres, setGenres] = useState([])
@@ -21,7 +21,12 @@ export default function UploadSongPage() {
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
-  const [success, setSuccess] = useState(false)
+  const [diagnostics, setDiagnostics] = useState({
+    authOk: false,
+    audioUploaded: false,
+    coverUploaded: false,
+    dbInsertOk: false,
+  })
 
   // Validate by extension — iOS/Safari often reports audio files as
   // application/octet-stream, so MIME-type checks alone will reject them.
@@ -85,9 +90,35 @@ export default function UploadSongPage() {
     return urlData.publicUrl
   }
 
+  async function insertSongRow(songRow) {
+    const attempt = { ...songRow, status: 'pending' }
+    console.log('[UploadSong] songs insert attempt payload:', attempt)
+
+    const { data, error } = await supabase
+      .from('songs')
+      .insert([attempt])
+      .select('id, title, status')
+      .single()
+
+    console.log('[UploadSong] songs insert result:', { data, error })
+
+    if (error) {
+      console.error('[UploadSong] songs insert failed', error)
+      throw new Error(error.message || 'Database insert failed for song.')
+    }
+
+    if (!data || !data.id) {
+      throw new Error('Song insert did not return a valid row.')
+    }
+
+    return data
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    setDiagnostics({ authOk: false, audioUploaded: false, coverUploaded: false, dbInsertOk: false })
+
     if (!form.title.trim()) { setError('Song title is required.'); return }
     if (!audioFile) { setError('Please select an audio file.'); return }
     if (!user?.id) { setError('Unable to detect your user account. Please sign out and sign back in.'); return }
@@ -98,9 +129,12 @@ export default function UploadSongPage() {
       const timestamp = Date.now()
       const safeTitle = form.title.replace(/[^a-z0-9]/gi, '-').toLowerCase()
 
-      console.log('[UploadSong] current user id:', user.id)
+      console.log('[UploadSong] current user:', user)
+      console.log('[UploadSong] current profile:', profile)
       console.log('[UploadSong] selected audio file:', audioFile)
       console.log('[UploadSong] selected cover file:', coverFile)
+
+      setDiagnostics(prev => ({ ...prev, authOk: true }))
 
       // Upload audio
       setProgress('Uploading audio…')
@@ -108,6 +142,7 @@ export default function UploadSongPage() {
       const audioPath = `${user.id}/${timestamp}-${safeTitle}.${audioExtension}`
       const audioUrl = await uploadFile('song-files', audioPath, audioFile)
       console.log('[UploadSong] Audio uploaded', { audioPath, audioUrl })
+      setDiagnostics(prev => ({ ...prev, audioUploaded: true }))
 
       // Upload cover (optional)
       let coverUrl = null
@@ -117,6 +152,7 @@ export default function UploadSongPage() {
         const coverPath = `${user.id}/${timestamp}-${safeTitle}.${coverExtension}`
         coverUrl = await uploadFile('cover-art', coverPath, coverFile)
         console.log('[UploadSong] Cover uploaded', { coverPath, coverUrl })
+        setDiagnostics(prev => ({ ...prev, coverUploaded: true }))
       }
 
       // Insert song row
@@ -125,38 +161,30 @@ export default function UploadSongPage() {
         artist_id: user.id,
         title: form.title.trim(),
         description: form.description.trim() || null,
-        genre_id: form.genre_id || null,
         audio_url: audioUrl,
         cover_url: coverUrl,
-        price: form.price ? parseFloat(form.price) : null,
         status: 'pending',
         play_count: 0,
       }
 
+      if (form.genre_id) {
+        songRow.genre_id = form.genre_id
+      }
+      if (form.price) {
+        const priceFloat = parseFloat(form.price)
+        if (!Number.isNaN(priceFloat)) {
+          songRow.price = priceFloat
+        }
+      }
+
       console.log('[UploadSong] songs insert payload:', songRow)
 
-      const { data: inserted, error: insertError } = await supabase
-        .from('songs')
-        .insert([songRow])
-        .select('id, title, status')
-        .single()
-
-      console.log('[UploadSong] songs insert result:', { inserted, insertError })
-
-      if (insertError) {
-        console.error('[UploadSong] songs insert failed', insertError)
-        throw new Error(`Database insert failed: ${insertError.message} (code: ${insertError.code})`)
-      }
-      if (!inserted) {
-        console.error('[UploadSong] songs insert returned no data', { songRow })
-        throw new Error('Insert returned no data from Supabase. Check RLS policies and insert permissions.')
-      }
-      if (inserted.status !== 'pending') {
-        console.warn('[UploadSong] Inserted song status is not pending:', inserted.status)
-      }
-
+      const inserted = await insertSongRow(songRow)
       console.log('[UploadSong] Row created successfully:', inserted)
-      setSuccess(true)
+      setDiagnostics(prev => ({ ...prev, dbInsertOk: true }))
+
+      navigate('/upload/song/success', { replace: true })
+      return
     } catch (err) {
       console.error('[UploadSong] Error', err)
       setError(err?.message || 'Something went wrong while uploading the song.')
@@ -166,27 +194,6 @@ export default function UploadSongPage() {
     }
   }
 
-  if (success) {
-    return (
-      <div className="page" style={{ maxWidth: 600 }}>
-        <div className="card" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
-          <h1 style={{ marginBottom: '0.5rem' }}>Song submitted!</h1>
-          <p style={{ color: 'var(--text)', marginBottom: '2rem' }}>
-            Your song has been submitted for review. You'll see it in your Artist Hub once approved.
-          </p>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-            <button className="btn btn-primary" onClick={() => { setSuccess(false); setForm({ title: '', description: '', genre_id: '', price: '' }); setAudioFile(null); setAudioError(''); setCoverFile(null); setCoverPreview(null) }}>
-              Upload another
-            </button>
-            <button className="btn btn-outline" onClick={() => navigate('/artist-dashboard')}>
-              Artist Hub
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   const genreOptions = genres.length
     ? genres
@@ -305,6 +312,16 @@ export default function UploadSongPage() {
 
           <div className="alert alert-info" style={{ marginBottom: '1.25rem' }}>
             ℹ️ Songs are reviewed before going live. Public listeners hear a 30-second preview only.
+          </div>
+
+          <div style={{ marginBottom: '1.25rem', padding: '1rem', border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface-2)' }}>
+            <strong style={{ display: 'block', marginBottom: '0.75rem' }}>Upload diagnostics</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <div>Auth OK</div><div>{diagnostics.authOk ? '✅' : '⏳'}</div>
+              <div>Audio uploaded</div><div>{diagnostics.audioUploaded ? '✅' : '⏳'}</div>
+              <div>Cover uploaded</div><div>{coverFile ? (diagnostics.coverUploaded ? '✅' : '⏳') : 'n/a'}</div>
+              <div>DB insert OK</div><div>{diagnostics.dbInsertOk ? '✅' : '⏳'}</div>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
