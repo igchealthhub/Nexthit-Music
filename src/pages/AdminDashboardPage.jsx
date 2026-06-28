@@ -257,7 +257,14 @@ export default function AdminDashboardPage() {
     if (error) {
       setContestManagerError(`Could not create contest: ${error.message}`)
       setCreatingContest(false)
-      return
+      return null
+    }
+
+    const createdContestId = data?.id
+    if (!createdContestId) {
+      setContestManagerError('Contest was created, but no contest id was returned.')
+      setCreatingContest(false)
+      return null
     }
 
     if (payload.status === 'active') {
@@ -269,7 +276,7 @@ export default function AdminDashboardPage() {
             type: 'general',
             title: 'New contest open for entries',
             body: `${payload.title} is now open. Submit your song before the deadline.`,
-            link: `/contests/${data.id}`,
+            link: `/contests/${createdContestId}`,
             read: false,
           }))
         )
@@ -293,6 +300,7 @@ export default function AdminDashboardPage() {
     })
     setCreatingContest(false)
     await loadAll()
+    return createdContestId
   }
 
   async function deleteContest(id) {

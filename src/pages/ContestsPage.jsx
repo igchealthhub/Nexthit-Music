@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const STATUS_COLORS = {
@@ -10,14 +10,25 @@ const STATUS_COLORS = {
 }
 
 export default function ContestsPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [contests, setContests] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [error, setError] = useState('')
+  const [routeMessage, setRouteMessage] = useState('')
 
   useEffect(() => {
     loadContests()
   }, [])
+
+  useEffect(() => {
+    const incomingMessage = location.state?.message
+    if (incomingMessage) {
+      setRouteMessage(incomingMessage)
+      navigate('/contests', { replace: true })
+    }
+  }, [location.state, navigate])
 
   async function loadContests() {
     setLoading(true)
@@ -63,6 +74,12 @@ export default function ContestsPage() {
       {error && (
         <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
           Failed to load contests: {error}
+        </div>
+      )}
+
+      {routeMessage && (
+        <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+          {routeMessage}
         </div>
       )}
 

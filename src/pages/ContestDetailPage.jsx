@@ -26,6 +26,10 @@ function countdownLabel(targetDate) {
   return `${days}d ${hours}h ${minutes}m`
 }
 
+function isUuid(value) {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 export default function ContestDetailPage() {
   const { id } = useParams()
   const { user, profile } = useAuth()
@@ -59,6 +63,14 @@ export default function ContestDetailPage() {
   }
 
   async function load() {
+    if (!isUuid(id)) {
+      navigate('/contests', {
+        replace: true,
+        state: { message: 'That contest link is invalid. Please pick a contest from the list.' },
+      })
+      return
+    }
+
     setLoading(true)
     setPageError('')
 
