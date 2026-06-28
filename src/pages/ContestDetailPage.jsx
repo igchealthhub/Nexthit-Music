@@ -283,6 +283,20 @@ export default function ContestDetailPage() {
     )
   }
 
+  if (!contest) {
+    return (
+      <div className="page" style={{ maxWidth: 700 }}>
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          {pageError || 'Unable to load this contest right now.'}
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button className="btn btn-primary" onClick={load}>Retry</button>
+          <Link to="/contests" className="btn btn-outline">Back to Contests</Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="page" style={{ maxWidth: 900 }}>
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>

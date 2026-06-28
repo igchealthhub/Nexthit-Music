@@ -46,6 +46,7 @@ export default function AdminDashboardPage() {
   async function loadAll() {
     setLoading(true)
     setFetchError('')
+    setContestManagerError('')
     setDebugInfo(null)
 
     const statusFilter = 'pending'
@@ -228,11 +229,30 @@ export default function AdminDashboardPage() {
       created_by: user?.id || null,
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('contests')
       .insert(payload)
       .select('*')
       .single()
+
+    if (error && error.code === 'PGRST204') {
+      const minimalPayload = {
+        title: payload.title,
+        description: payload.description,
+        status: payload.status,
+        start_date: payload.start_date,
+        end_date: payload.end_date,
+      }
+
+      const retry = await supabase
+        .from('contests')
+        .insert(minimalPayload)
+        .select('*')
+        .single()
+
+      data = retry.data
+      error = retry.error
+    }
 
     if (error) {
       setContestManagerError(`Could not create contest: ${error.message}`)
@@ -243,7 +263,7 @@ export default function AdminDashboardPage() {
     if (payload.status === 'active') {
       const { data: artists } = await supabase.from('profiles').select('id').eq('role', 'artist')
       if (artists?.length) {
-        await supabase.from('notifications').insert(
+        const notifyRes = await supabase.from('notifications').insert(
           artists.map(artist => ({
             user_id: artist.id,
             type: 'general',
@@ -253,6 +273,9 @@ export default function AdminDashboardPage() {
             read: false,
           }))
         )
+        if (notifyRes.error) {
+          setContestManagerError(`Contest created, but artist notifications failed: ${notifyRes.error.message}`)
+        }
       }
     }
 
@@ -302,7 +325,7 @@ export default function AdminDashboardPage() {
       return
     }
 
-    await supabase.from('notifications').insert({
+    const winnerNotify = await supabase.from('notifications').insert({
       user_id: entry.artist_id,
       type: 'general',
       title: 'You won a contest!',
@@ -310,6 +333,10 @@ export default function AdminDashboardPage() {
       link: `/contests/${contestId}`,
       read: false,
     })
+
+    if (winnerNotify.error) {
+      setContestManagerError(`Winner selected, but winner notification failed: ${winnerNotify.error.message}`)
+    }
 
     await loadAll()
   }
