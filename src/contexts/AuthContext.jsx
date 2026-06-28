@@ -3,6 +3,37 @@ import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext({})
 
+function normalizeSignupError(error) {
+  if (!error) return null
+
+  const name = error?.name || null
+  const message = error?.message || null
+  const details = error?.details || null
+  const hint = error?.hint || null
+  const code = error?.code || null
+  const status = error?.status || null
+
+  const hasAny = [name, message, details, hint, code, status].some(Boolean)
+  if (hasAny) {
+    return {
+      ...error,
+      name,
+      message: message || (name === 'AuthRetryableFetchError'
+        ? 'Signup request could not reach Supabase. Check network connectivity and Supabase project status.'
+        : 'Signup failed. Please try again.'),
+      details,
+      hint,
+      code,
+      status,
+    }
+  }
+
+  return {
+    ...error,
+    message: 'Signup failed. Please try again.',
+  }
+}
+
 function normalizeProfile(profile, authUser) {
   if (!profile) return null
 
@@ -160,11 +191,22 @@ export function AuthProvider({ children }) {
 
       if (signupResult.error) {
         console.error('SIGNUP ERROR', signupResult.error)
-        return signupResult
+        return {
+          ...signupResult,
+          error: normalizeSignupError(signupResult.error),
+        }
       }
 
       const authUser = signupResult.data?.user
+      const authSessionUserId = signupResult.data?.session?.user?.id
       if (!authUser?.id) return signupResult
+
+      // With email confirmation enabled, signup often returns a user without an active session.
+      // In that case, RLS can block profile upsert from the client. We keep signup successful
+      // and rely on metadata + first authenticated profile bootstrap after login.
+      if (!authSessionUserId) {
+        return signupResult
+      }
 
       const profilePayload = {
         id: authUser.id,
@@ -182,19 +224,13 @@ export function AuthProvider({ children }) {
       const { error: profileError } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' })
       if (profileError) {
         console.error('SIGNUP ERROR', profileError)
-        return {
-          data: signupResult.data,
-          error: {
-            ...profileError,
-            message: profileError.message || profileError.details || 'Failed to save agreement tracking to profile.',
-          },
-        }
+        return signupResult
       }
 
       return signupResult
     } catch (error) {
       console.error('SIGNUP ERROR', error)
-      return { data: null, error }
+      return { data: null, error: normalizeSignupError(error) }
     }
   }
 

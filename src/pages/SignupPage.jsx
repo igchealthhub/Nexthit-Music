@@ -10,7 +10,14 @@ const ROLES = [
 function formatSignupError(error) {
   if (!error) return 'Signup failed. Please try again.'
 
-  const parts = [error.message, error.details, error.hint, error.code].filter(Boolean)
+  const parts = [
+    error.message,
+    error.details,
+    error.hint,
+    error.code ? `code=${error.code}` : null,
+    error.status ? `status=${error.status}` : null,
+    error.name ? `type=${error.name}` : null,
+  ].filter(Boolean)
   if (parts.length > 0) return parts.join(' | ')
 
   try {
