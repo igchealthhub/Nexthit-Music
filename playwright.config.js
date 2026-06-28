@@ -5,7 +5,8 @@ const HOST = process.env.E2E_HOST || '127.0.0.1'
 const BASE_URL = process.env.E2E_BASE_URL || `http://${HOST}:${PORT}`
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: '.',
+  testMatch: ['e2e/**/*.spec.js', 'tests/**/*.spec.js'],
   timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

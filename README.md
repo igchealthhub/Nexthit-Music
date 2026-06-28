@@ -14,3 +14,11 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## Daily Health Check
+
+Run this quick Playwright suite before and after major feature work to catch blank pages, runtime crashes, navigation failures, and broken routes.
+
+- `npm run health` runs the automated daily health check.
+- `npm run health:ui` opens the Playwright UI runner for interactive health checks.
+- `npm run health:report` opens the latest HTML test report.

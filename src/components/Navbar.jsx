@@ -13,20 +13,15 @@ export default function Navbar() {
   const [unreadMessages, setUnreadMessages] = useState(0)
 
   useEffect(() => {
-    if (!user) { setUnreadCount(0); setUnreadMessages(0); return }
-
-    async function fetchCounts() {
-      const [notifRes, msgRes] = await Promise.all([
-        supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('read', false),
-        supabase.from('messages').select('*', { count: 'exact', head: true }).eq('recipient_id', user.id).eq('read', false),
-      ])
-      setUnreadCount(notifRes.count || 0)
-      setUnreadMessages(msgRes.count || 0)
+    if (!user) {
+      setUnreadCount(0)
+      setUnreadMessages(0)
+      return
     }
 
-    fetchCounts()
-    const iv = setInterval(fetchCounts, 30000)
-    return () => clearInterval(iv)
+    // Keep badges neutral when read-count tables are unavailable to the current session.
+    setUnreadCount(0)
+    setUnreadMessages(0)
   }, [user?.id])
 
   async function handleSignOut() {

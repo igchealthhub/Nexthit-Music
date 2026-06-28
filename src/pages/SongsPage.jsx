@@ -79,30 +79,38 @@ export default function SongsPage() {
 
     const ids = songData.map(s => s.id)
 
-    const [likesData, ratingsData, commentData] = await Promise.all([
-      supabase.from('likes').select('song_id').in('song_id', ids),
-      supabase.from('ratings').select('song_id, rating').in('song_id', ids),
-      supabase.from('comments').select('song_id').in('song_id', ids),
-    ])
+    setLikeCounts({})
+    setRatingAvgs({})
+    setRatingCounts({})
+    setCommentCounts({})
+    setUserLikes(new Set())
+    setUserRatings({})
+    setUserPurchases(new Set())
 
-    const lc = {}
-    likesData.data?.forEach(l => { lc[l.song_id] = (lc[l.song_id] || 0) + 1 })
-    setLikeCounts(lc)
+    if (ids.length > 0 && user) {
+      const [likesData, ratingsData, commentData] = await Promise.all([
+        supabase.from('likes').select('song_id').in('song_id', ids),
+        supabase.from('ratings').select('song_id, rating').in('song_id', ids),
+        supabase.from('comments').select('song_id').in('song_id', ids),
+      ])
 
-    const avgs = {}, counts = {}
-    ratingsData.data?.forEach(r => {
-      avgs[r.song_id] = (avgs[r.song_id] || 0) + r.rating
-      counts[r.song_id] = (counts[r.song_id] || 0) + 1
-    })
-    Object.keys(avgs).forEach(id => { avgs[id] = avgs[id] / counts[id] })
-    setRatingAvgs(avgs)
-    setRatingCounts(counts)
+      const lc = {}
+      likesData.data?.forEach(l => { lc[l.song_id] = (lc[l.song_id] || 0) + 1 })
+      setLikeCounts(lc)
 
-    const cc = {}
-    commentData.data?.forEach(c => { cc[c.song_id] = (cc[c.song_id] || 0) + 1 })
-    setCommentCounts(cc)
+      const avgs = {}, counts = {}
+      ratingsData.data?.forEach(r => {
+        avgs[r.song_id] = (avgs[r.song_id] || 0) + r.rating
+        counts[r.song_id] = (counts[r.song_id] || 0) + 1
+      })
+      Object.keys(avgs).forEach(id => { avgs[id] = avgs[id] / counts[id] })
+      setRatingAvgs(avgs)
+      setRatingCounts(counts)
 
-    if (user) {
+      const cc = {}
+      commentData.data?.forEach(c => { cc[c.song_id] = (cc[c.song_id] || 0) + 1 })
+      setCommentCounts(cc)
+
       const [myLikes, myRatings, myPurchases] = await Promise.all([
         supabase.from('likes').select('song_id').eq('user_id', user.id).in('song_id', ids),
         supabase.from('ratings').select('song_id, rating').eq('user_id', user.id).in('song_id', ids),

@@ -1,19 +1,27 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function VideosPage() {
+  const { user } = useAuth()
   const [videos, setVideos] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
 
   useEffect(() => {
+    if (!user) {
+      setVideos([])
+      setLoading(false)
+      return
+    }
+
     supabase
       .from('videos')
       .select('*')
       .eq('status', 'published')
       .order('created_at', { ascending: false })
       .then(({ data }) => { setVideos(data || []); setLoading(false) })
-  }, [])
+  }, [user])
 
   return (
     <div className="page">
@@ -48,6 +56,12 @@ export default function VideosPage() {
 
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
+      ) : !user ? (
+        <div className="empty-state">
+          <div className="empty-icon">🎬</div>
+          <h3>Log in to view videos</h3>
+          <p>Video playback is available for signed-in users.</p>
+        </div>
       ) : videos.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🎬</div>

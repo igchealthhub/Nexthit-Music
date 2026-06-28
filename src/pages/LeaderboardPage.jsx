@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function LeaderboardPage() {
+  const { user } = useAuth()
   const [tab, setTab] = useState('plays')
   const [songsByPlays, setSongsByPlays] = useState([])
   const [songsByLikes, setSongsByLikes] = useState([])
@@ -10,9 +12,18 @@ export default function LeaderboardPage() {
   const [activeContest, setActiveContest] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [user])
 
   async function load() {
+    if (!user) {
+      setSongsByPlays([])
+      setSongsByLikes([])
+      setContestEntries([])
+      setActiveContest(null)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
 
     const [playsRes, likesRes, contestRes] = await Promise.all([
@@ -95,6 +106,12 @@ export default function LeaderboardPage() {
 
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
+      ) : !user ? (
+        <div className="empty-state">
+          <div className="empty-icon">🏆</div>
+          <h3>Log in to view leaderboard details</h3>
+          <p>Rankings become available after sign in.</p>
+        </div>
       ) : (
         <>
           {/* Most Played */}

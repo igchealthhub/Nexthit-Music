@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 const STATUS_COLORS = {
   draft: 'badge-fan',
@@ -10,6 +11,7 @@ const STATUS_COLORS = {
 }
 
 export default function ContestsPage() {
+  const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [contests, setContests] = useState([])
@@ -20,7 +22,7 @@ export default function ContestsPage() {
 
   useEffect(() => {
     loadContests()
-  }, [])
+  }, [user])
 
   useEffect(() => {
     const incomingMessage = location.state?.message
@@ -31,6 +33,13 @@ export default function ContestsPage() {
   }, [location.state, navigate])
 
   async function loadContests() {
+    if (!user) {
+      setContests([])
+      setError('')
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError('')
 
@@ -85,6 +94,12 @@ export default function ContestsPage() {
 
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
+      ) : !user ? (
+        <div className="empty-state">
+          <div className="empty-icon">🎤</div>
+          <h3>Log in to view contests</h3>
+          <p>Contest entries and voting are available for signed-in users.</p>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🎤</div>

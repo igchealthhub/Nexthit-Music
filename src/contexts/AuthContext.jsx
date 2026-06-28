@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
     async function loadSession() {
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        console.error('Auth session loaded', session)
+        console.info('Auth session loaded', session)
         if (!isMounted) return
 
         setUser(session?.user ?? null)
@@ -43,7 +43,7 @@ export function AuthProvider({ children }) {
           setLoading(false)
         }
       } catch (err) {
-        console.error('Failed to load auth session', err)
+        console.info('Failed to load auth session', err)
         if (!isMounted) return
 
         setUser(null)
@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
     loadSession()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.error('Auth session changed', _event, session)
+      console.info('Auth session changed', _event, session)
       setUser(session?.user ?? null)
       if (session?.user) {
         fetchProfile(session.user.id, session.user)
@@ -81,10 +81,10 @@ export function AuthProvider({ children }) {
 
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
-      console.error('Profile fetch result', { userId, data, error })
+      console.info('Profile fetch result', { userId, data, error })
 
       if (!data && !error) {
-        console.error('Profile row missing for user, creating one', userId)
+        console.info('Profile row missing for user, creating one', userId)
         const defaultProfile = {
           id: userId,
           email: currentUser?.email ?? undefined,
@@ -102,7 +102,7 @@ export function AuthProvider({ children }) {
           throw insertError
         }
 
-        console.error('Created missing profile row', newProfile)
+        console.info('Created missing profile row', newProfile)
         return await fetchProfile(userId, currentUser)
       }
 
@@ -114,7 +114,7 @@ export function AuthProvider({ children }) {
       setProfile(normalized)
       return { data: normalized, error }
     } catch (err) {
-      console.error('Profile fetch error', err)
+      console.info('Profile fetch error', err)
       setProfile(null)
       setAuthError(err?.message || 'Unable to load profile')
       return { data: null, error: err }
