@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -20,6 +20,8 @@ export default function UploadSongPage() {
   const [coverPreview, setCoverPreview] = useState(null)
   const [error, setError] = useState('')
   const [supabaseError, setSupabaseError] = useState(null)
+  const [success, setSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
   const [diagnostics, setDiagnostics] = useState({
@@ -52,10 +54,20 @@ export default function UploadSongPage() {
     setAudioFile(file)
   }
 
+  const redirectTimerRef = useRef(null)
+
   useEffect(() => {
     supabase.from('genres').select('id, name').then(({ data }) => {
       if (data?.length) setGenres(data)
     })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current)
+      }
+    }
   }, [])
 
   function handleCoverChange(e) {
@@ -126,6 +138,9 @@ export default function UploadSongPage() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    setSuccess(false)
+    setSuccessMessage('')
+    setSupabaseError(null)
     setDiagnostics({ authOk: false, audioUploaded: false, coverUploaded: false, dbInsertOk: false })
 
     if (!form.title.trim()) { setError('Song title is required.'); return }
@@ -184,8 +199,10 @@ export default function UploadSongPage() {
       const inserted = await insertSongRow(songRow)
       console.log('[UploadSong] Row created successfully:', inserted)
       setDiagnostics(prev => ({ ...prev, dbInsertOk: true }))
-
-      navigate('/upload/song/success', { replace: true })
+      setSuccess(true)
+      setSuccessMessage('Song submitted for review.')
+      setProgress('Submission complete — redirecting to Artist Dashboard…')
+      redirectTimerRef.current = setTimeout(() => navigate('/artist-dashboard', { replace: true }), 1500)
       return
     } catch (err) {
       console.error('[UploadSong] Error', err)
@@ -198,7 +215,7 @@ export default function UploadSongPage() {
       })
     } finally {
       setUploading(false)
-      setProgress('')
+      if (!success) setProgress('')
     }
   }
 
@@ -228,9 +245,21 @@ export default function UploadSongPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          {/* Cover art */}
-          <div className="form-group">
+        {success ? (
+          <div style={{ padding: '2rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
+            <h2 style={{ marginBottom: '0.5rem' }}>{successMessage}</h2>
+            <p style={{ marginBottom: '1.5rem', color: 'var(--text)' }}>
+              Your song is now pending review. You will be redirected to your artist dashboard shortly.
+            </p>
+            <button className="btn btn-primary" onClick={() => navigate('/artist-dashboard')}>
+              Go to Artist Dashboard
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            {/* Cover art */}
+            <div className="form-group">
             <label>Cover Art</label>
             <div
               style={{
@@ -352,6 +381,7 @@ export default function UploadSongPage() {
             </button>
           </div>
         </form>
+      )}
       </div>
     </div>
   )
