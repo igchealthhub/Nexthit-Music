@@ -19,6 +19,7 @@ export default function UploadSongPage() {
   const [coverFile, setCoverFile] = useState(null)
   const [coverPreview, setCoverPreview] = useState(null)
   const [error, setError] = useState('')
+  const [supabaseError, setSupabaseError] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
   const [diagnostics, setDiagnostics] = useState({
@@ -101,14 +102,22 @@ export default function UploadSongPage() {
       .single()
 
     console.log('[UploadSong] songs insert result:', { data, error })
+    console.log('SONG INSERT PAYLOAD', attempt)
+    console.log('SONG INSERT ERROR', error)
 
     if (error) {
       console.error('[UploadSong] songs insert failed', error)
-      throw new Error(error.message || 'Database insert failed for song.')
+      const normalizedError = {
+        message: error.message || 'Database insert failed for song.',
+        details: error.details || null,
+        hint: error.hint || null,
+        code: error.code || null,
+      }
+      throw normalizedError
     }
 
     if (!data || !data.id) {
-      throw new Error('Song insert did not return a valid row.')
+      throw { message: 'Song insert did not return a valid row.', details: null, hint: null }
     }
 
     return data
@@ -157,24 +166,17 @@ export default function UploadSongPage() {
 
       // Insert song row
       setProgress('Saving song…')
+      const priceFloat = form.price ? parseFloat(form.price) : null
       const songRow = {
         artist_id: user.id,
         title: form.title.trim(),
         description: form.description.trim() || null,
+        genre_id: form.genre_id || null,
         audio_url: audioUrl,
         cover_url: coverUrl,
+        price: Number.isNaN(priceFloat) ? null : priceFloat,
         status: 'pending',
         play_count: 0,
-      }
-
-      if (form.genre_id) {
-        songRow.genre_id = form.genre_id
-      }
-      if (form.price) {
-        const priceFloat = parseFloat(form.price)
-        if (!Number.isNaN(priceFloat)) {
-          songRow.price = priceFloat
-        }
       }
 
       console.log('[UploadSong] songs insert payload:', songRow)
@@ -187,7 +189,13 @@ export default function UploadSongPage() {
       return
     } catch (err) {
       console.error('[UploadSong] Error', err)
-      setError(err?.message || 'Something went wrong while uploading the song.')
+      const message = err?.message || 'Something went wrong while uploading the song.'
+      setError(message)
+      setSupabaseError({
+        details: err?.details || null,
+        hint: err?.hint || null,
+        code: err?.code || null,
+      })
     } finally {
       setUploading(false)
       setProgress('')
@@ -207,7 +215,18 @@ export default function UploadSongPage() {
       </div>
 
       <div className="card">
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && (
+          <div className="alert alert-error">
+            <div>{error}</div>
+            {supabaseError && (
+              <div style={{ marginTop: '0.75rem', fontFamily: 'monospace', fontSize: '0.9rem' }}>
+                {supabaseError.details && <div><strong>Details:</strong> {supabaseError.details}</div>}
+                {supabaseError.hint && <div><strong>Hint:</strong> {supabaseError.hint}</div>}
+                {supabaseError.code && <div><strong>Code:</strong> {supabaseError.code}</div>}
+              </div>
+            )}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           {/* Cover art */}
