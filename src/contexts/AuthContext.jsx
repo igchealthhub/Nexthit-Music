@@ -172,6 +172,8 @@ export function AuthProvider({ children }) {
       const acceptedPrivacy = agreements.acceptedPrivacy === true
       const acceptedArtistAgreement = role === 'artist' && agreements.acceptedArtistAgreement === true
 
+      console.log('SIGNUP PAYLOAD', { email, role })
+
       const signupResult = await supabase.auth.signUp({
         email,
         password,
@@ -189,6 +191,8 @@ export function AuthProvider({ children }) {
         },
       })
 
+      console.log('SIGNUP RESULT', signupResult.data)
+
       if (signupResult.error) {
         console.error('SIGNUP ERROR', signupResult.error)
         return {
@@ -199,12 +203,22 @@ export function AuthProvider({ children }) {
 
       const authUser = signupResult.data?.user
       const authSessionUserId = signupResult.data?.session?.user?.id
-      if (!authUser?.id) return signupResult
+      if (!authUser?.id) {
+        console.error('SIGNUP ERROR', { message: 'Signup completed without user id in result.', data: signupResult.data })
+        return {
+          ...signupResult,
+          error: normalizeSignupError({
+            message: 'Signup request returned no user record. Please try again.',
+            details: JSON.stringify(signupResult.data || {}),
+          }),
+        }
+      }
 
       // With email confirmation enabled, signup often returns a user without an active session.
       // In that case, RLS can block profile upsert from the client. We keep signup successful
       // and rely on metadata + first authenticated profile bootstrap after login.
       if (!authSessionUserId) {
+        console.log('SIGNUP RESULT', { message: 'Signup succeeded without active session; profile upsert deferred until login.', userId: authUser.id })
         return signupResult
       }
 
@@ -224,7 +238,13 @@ export function AuthProvider({ children }) {
       const { error: profileError } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' })
       if (profileError) {
         console.error('SIGNUP ERROR', profileError)
-        return signupResult
+        return {
+          ...signupResult,
+          error: normalizeSignupError({
+            ...profileError,
+            message: profileError.message || 'Failed to save agreement tracking to profile.',
+          }),
+        }
       }
 
       return signupResult

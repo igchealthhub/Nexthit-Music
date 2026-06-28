@@ -36,15 +36,24 @@ export default function SignupPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [statusText, setStatusText] = useState('')
 
   async function handleSubmit(e) {
     e.preventDefault()
+    console.log('SIGNUP SUBMIT CLICKED')
     setError('')
+    setStatusText('Creating account...')
+
     if (!acceptedRequiredTerms || (form.role === 'artist' && !acceptedArtistAgreement)) {
       setError('You must agree to the required terms before creating an account.')
+      setStatusText('')
       return
     }
-    if (form.password.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (form.password.length < 6) {
+      setError('Password must be at least 6 characters.')
+      setStatusText('')
+      return
+    }
 
     try {
       setLoading(true)
@@ -60,6 +69,7 @@ export default function SignupPage() {
       if (error) {
         console.error('SIGNUP ERROR', error)
         setError(formatSignupError(error))
+        setStatusText('')
         return
       }
 
@@ -67,6 +77,7 @@ export default function SignupPage() {
     } catch (error) {
       console.error('SIGNUP ERROR', error)
       setError(formatSignupError(error))
+      setStatusText('')
     } finally {
       setLoading(false)
     }
@@ -92,7 +103,7 @@ export default function SignupPage() {
         <p className="subtitle">Join NextHit and discover the next hit</p>
 
         {error && <div className="alert alert-error">{error}</div>}
-        {loading && <div className="alert alert-info">Creating your account…</div>}
+        {(loading || statusText) && <div className="alert alert-info">{statusText || 'Creating account...'}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
