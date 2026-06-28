@@ -405,7 +405,7 @@ export default function ArtistDashboardPage() {
                         <span style={{ fontWeight: 500, color: 'var(--text-h)', fontSize: '0.9rem' }}>{c.title}</span>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                           <span className={`badge ${c.status === 'active' ? 'badge-active' : 'badge-pending'}`}>{c.status}</span>
-                          {c.id && <Link to={`/contest/${c.id}`} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>View →</Link>}
+                          {c.id && <Link to={`/contests/${c.id}`} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>View →</Link>}
                         </div>
                       </div>
                     ))}

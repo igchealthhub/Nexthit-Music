@@ -296,7 +296,7 @@ export default function FanDashboardPage() {
           ) : (
             <div className="card" style={{ padding: 0 }}>
               {contestEntries.map((c, i) => (
-                <Link key={i} to={`/contest/${c.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                <Link key={i} to={`/contests/${c.id}`} style={{ textDecoration: 'none', display: 'block' }}>
                   <div className="list-row">
                     <div className="list-thumb" style={{ background: 'var(--surface-3)' }}>🏆</div>
                     <div className="list-info">

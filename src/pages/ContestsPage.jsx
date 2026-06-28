@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const STATUS_COLORS = {
+  draft: 'badge-fan',
   active: 'badge-active',
-  upcoming: 'badge-pending',
+  voting: 'badge-pending',
   closed: 'badge-fan',
 }
 
@@ -12,14 +13,31 @@ export default function ContestsPage() {
   const [contests, setContests] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    supabase
+    loadContests()
+  }, [])
+
+  async function loadContests() {
+    setLoading(true)
+    setError('')
+
+    const { data, error: fetchError } = await supabase
       .from('contests')
       .select('*, contest_entries(id)')
       .order('created_at', { ascending: false })
-      .then(({ data }) => { setContests(data || []); setLoading(false) })
-  }, [])
+
+    if (fetchError) {
+      setError(fetchError.message)
+      setContests([])
+      setLoading(false)
+      return
+    }
+
+    setContests(data || [])
+    setLoading(false)
+  }
 
   const filtered = filter === 'all' ? contests : contests.filter(c => c.status === filter)
 
@@ -31,7 +49,7 @@ export default function ContestsPage() {
       </div>
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        {['all', 'active', 'upcoming', 'closed'].map(f => (
+        {['all', 'draft', 'active', 'voting', 'closed'].map(f => (
           <button
             key={f}
             className={`btn btn-sm ${filter === f ? 'btn-primary' : 'btn-outline'}`}
@@ -41,6 +59,12 @@ export default function ContestsPage() {
           </button>
         ))}
       </div>
+
+      {error && (
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          Failed to load contests: {error}
+        </div>
+      )}
 
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
@@ -72,10 +96,10 @@ export default function ContestsPage() {
                     {entryCount} {entryCount === 1 ? 'entry' : 'entries'} · {new Date(c.created_at).toLocaleDateString()}
                   </div>
                   <Link
-                    to={`/contest/${c.id}`}
-                    className={`btn btn-sm ${c.status === 'active' ? 'btn-primary' : 'btn-outline'}`}
+                    to={`/contests/${c.id}`}
+                    className={`btn btn-sm ${c.status === 'active' || c.status === 'voting' ? 'btn-primary' : 'btn-outline'}`}
                   >
-                    {c.status === 'active' ? '🗳️ Vote & Enter' : '🔍 View'}
+                    {c.status === 'active' || c.status === 'voting' ? '🗳️ Vote & Enter' : '🔍 View'}
                   </Link>
                 </div>
               </div>

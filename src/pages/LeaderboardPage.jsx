@@ -173,7 +173,7 @@ export default function LeaderboardPage() {
                     <h2 style={{ fontSize: '1.0625rem' }}>{activeContest.title}</h2>
                     <span className="badge badge-active" style={{ fontSize: '0.75rem' }}>Active</span>
                   </div>
-                  <Link to={`/contest/${activeContest.id}`} className="btn btn-primary btn-sm">🗳️ Vote →</Link>
+                  <Link to={`/contests/${activeContest.id}`} className="btn btn-primary btn-sm">🗳️ Vote →</Link>
                 </div>
                 {contestEntries.length === 0 ? (
                   <div className="empty-state" style={{ padding: '2rem' }}>

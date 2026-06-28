@@ -65,6 +65,7 @@ export default function App() {
               <Route path="/admin" element={
                 <ProtectedRoute adminOnly><AdminDashboardPage /></ProtectedRoute>
               } />
+              <Route path="/contests/:id" element={<ContestDetailPage />} />
               <Route path="/contest/:id" element={<ContestDetailPage />} />
               <Route path="/artist/:id" element={<ArtistProfilePage />} />
               <Route path="/trending" element={<TrendingPage />} />

@@ -7,9 +7,8 @@ const STATUS_MAP = {
   approved:  'badge-active',
   rejected:  'badge-admin',
   draft:     'badge-fan',
-  published: 'badge-active',
   active:    'badge-active',
-  upcoming:  'badge-pending',
+  voting:    'badge-pending',
   closed:    'badge-fan',
 }
 
@@ -22,6 +21,21 @@ export default function AdminDashboardPage() {
   const [pendingVideos, setPendingVideos] = useState([])
   const [users, setUsers] = useState([])
   const [contests, setContests] = useState([])
+  const [contestEntries, setContestEntries] = useState([])
+  const [contestManagerError, setContestManagerError] = useState('')
+  const [creatingContest, setCreatingContest] = useState(false)
+  const [contestForm, setContestForm] = useState({
+    title: '',
+    description: '',
+    prize: '',
+    category: '',
+    start_date: '',
+    end_date: '',
+    entry_deadline: '',
+    voting_deadline: '',
+    rules: '',
+    status: 'draft',
+  })
   const [userStats, setUserStats] = useState({ total: 0, artists: 0, fans: 0, admins: 0 })
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState('')
@@ -88,7 +102,26 @@ export default function AdminDashboardPage() {
       admins:  allUsers.filter(u => u.is_admin).length,
     })
 
-    setContests(c.data ?? [])
+    const contestsData = c.data ?? []
+    setContests(contestsData)
+
+    const contestIds = contestsData.map(contest => contest.id)
+    if (contestIds.length) {
+      const entriesRes = await supabase
+        .from('contest_entries')
+        .select('id, contest_id, artist_id, song_id, created_at, songs(id, title), contest_votes(id)')
+        .in('contest_id', contestIds)
+
+      if (entriesRes.error) {
+        console.error('[AdminDashboard] contest entries query failed', entriesRes.error)
+        setContestManagerError(entriesRes.error.message)
+        setContestEntries([])
+      } else {
+        setContestEntries(entriesRes.data ?? [])
+      }
+    } else {
+      setContestEntries([])
+    }
     setDebugInfo({
       statusFilter,
       authUserId: user?.id ?? null,
@@ -168,6 +201,109 @@ export default function AdminDashboardPage() {
     const { error } = await supabase.from('contests').update({ status }).eq('id', id)
     if (error) { alert(`Update failed: ${error.message}`); return }
     setContests(prev => prev.map(c => c.id === id ? { ...c, status } : c))
+  }
+
+  async function createContest(e) {
+    e.preventDefault()
+    setContestManagerError('')
+
+    if (!contestForm.title.trim()) {
+      setContestManagerError('Contest title is required.')
+      return
+    }
+
+    setCreatingContest(true)
+
+    const payload = {
+      title: contestForm.title.trim(),
+      description: contestForm.description.trim() || null,
+      prize: contestForm.prize.trim() || null,
+      category: contestForm.category.trim() || null,
+      start_date: contestForm.start_date || null,
+      end_date: contestForm.end_date || null,
+      entry_deadline: contestForm.entry_deadline || null,
+      voting_deadline: contestForm.voting_deadline || null,
+      rules: contestForm.rules.trim() || null,
+      status: contestForm.status || 'draft',
+      created_by: user?.id || null,
+    }
+
+    const { data, error } = await supabase
+      .from('contests')
+      .insert(payload)
+      .select('*')
+      .single()
+
+    if (error) {
+      setContestManagerError(`Could not create contest: ${error.message}`)
+      setCreatingContest(false)
+      return
+    }
+
+    if (payload.status === 'active') {
+      const { data: artists } = await supabase.from('profiles').select('id').eq('role', 'artist')
+      if (artists?.length) {
+        await supabase.from('notifications').insert(
+          artists.map(artist => ({
+            user_id: artist.id,
+            type: 'general',
+            title: 'New contest open for entries',
+            body: `${payload.title} is now open. Submit your song before the deadline.`,
+            link: `/contests/${data.id}`,
+            read: false,
+          }))
+        )
+      }
+    }
+
+    setContestForm({
+      title: '',
+      description: '',
+      prize: '',
+      category: '',
+      start_date: '',
+      end_date: '',
+      entry_deadline: '',
+      voting_deadline: '',
+      rules: '',
+      status: 'draft',
+    })
+    setCreatingContest(false)
+    await loadAll()
+  }
+
+  async function deleteContest(id) {
+    if (!confirm('Delete this contest and its entries?')) return
+    const { error } = await supabase.from('contests').delete().eq('id', id)
+    if (error) {
+      setContestManagerError(`Delete failed: ${error.message}`)
+      return
+    }
+    await loadAll()
+  }
+
+  async function markWinner(contestId, entry) {
+    setContestManagerError('')
+    const { error } = await supabase
+      .from('contests')
+      .update({ winner_entry_id: entry.id, winner_song_id: entry.song_id, winner_artist_id: entry.artist_id, status: 'closed' })
+      .eq('id', contestId)
+
+    if (error) {
+      setContestManagerError(`Could not mark winner: ${error.message}`)
+      return
+    }
+
+    await supabase.from('notifications').insert({
+      user_id: entry.artist_id,
+      type: 'general',
+      title: 'You won a contest!',
+      body: `Congratulations! Your entry won this contest.`,
+      link: `/contests/${contestId}`,
+      read: false,
+    })
+
+    await loadAll()
   }
 
   async function toggleVerified(id, current) {
@@ -322,11 +458,120 @@ export default function AdminDashboardPage() {
           {tab === 'users' && <UsersTable users={users} onVerify={toggleVerified} />}
 
           {tab === 'contests' && (
-            <ContestsTable
-              contests={contests}
-              onStatus={updateContestStatus}
-              onDelete={id => deleteItem('contests', id, setContests)}
-            />
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              {contestManagerError && (
+                <div className="alert alert-error">{contestManagerError}</div>
+              )}
+
+              <div className="card">
+                <h3 style={{ marginBottom: '1rem' }}>Create Contest</h3>
+                <form onSubmit={createContest}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div className="form-group">
+                      <label>Title *</label>
+                      <input
+                        className="input"
+                        value={contestForm.title}
+                        onChange={e => setContestForm(prev => ({ ...prev, title: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Category</label>
+                      <input
+                        className="input"
+                        value={contestForm.category}
+                        onChange={e => setContestForm(prev => ({ ...prev, category: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Prize</label>
+                      <input
+                        className="input"
+                        value={contestForm.prize}
+                        onChange={e => setContestForm(prev => ({ ...prev, prize: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Status</label>
+                      <select
+                        className="input"
+                        value={contestForm.status}
+                        onChange={e => setContestForm(prev => ({ ...prev, status: e.target.value }))}
+                      >
+                        <option value="draft">draft</option>
+                        <option value="active">active</option>
+                        <option value="voting">voting</option>
+                        <option value="closed">closed</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Start Date</label>
+                      <input
+                        className="input"
+                        type="datetime-local"
+                        value={contestForm.start_date}
+                        onChange={e => setContestForm(prev => ({ ...prev, start_date: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>End Date</label>
+                      <input
+                        className="input"
+                        type="datetime-local"
+                        value={contestForm.end_date}
+                        onChange={e => setContestForm(prev => ({ ...prev, end_date: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Entry Deadline</label>
+                      <input
+                        className="input"
+                        type="datetime-local"
+                        value={contestForm.entry_deadline}
+                        onChange={e => setContestForm(prev => ({ ...prev, entry_deadline: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Voting Deadline</label>
+                      <input
+                        className="input"
+                        type="datetime-local"
+                        value={contestForm.voting_deadline}
+                        onChange={e => setContestForm(prev => ({ ...prev, voting_deadline: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Description</label>
+                    <textarea
+                      className="input"
+                      value={contestForm.description}
+                      onChange={e => setContestForm(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Rules</label>
+                    <textarea
+                      className="input"
+                      value={contestForm.rules}
+                      onChange={e => setContestForm(prev => ({ ...prev, rules: e.target.value }))}
+                    />
+                  </div>
+                  <button className="btn btn-primary" type="submit" disabled={creatingContest}>
+                    {creatingContest ? 'Creating…' : 'Create Contest'}
+                  </button>
+                </form>
+              </div>
+
+              <ContestsTable
+                contests={contests}
+                entries={contestEntries}
+                onStatus={updateContestStatus}
+                onDelete={deleteContest}
+                onMarkWinner={markWinner}
+              />
+            </div>
           )}
         </>
       )}
@@ -482,7 +727,7 @@ function UsersTable({ users, onVerify }) {
   )
 }
 
-function ContestsTable({ contests, onStatus, onDelete }) {
+function ContestsTable({ contests, entries, onStatus, onDelete, onMarkWinner }) {
   if (!contests.length) {
     return (
       <div className="empty-state">
@@ -493,44 +738,66 @@ function ContestsTable({ contests, onStatus, onDelete }) {
     )
   }
   return (
-    <div className="card" style={{ padding: 0 }}>
-      <div className="table-wrap">
-        <table className="table">
-          <thead><tr><th>Title</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
-          <tbody>
-            {contests.map(c => (
-              <tr key={c.id}>
-                <td>
-                  <div style={{ fontWeight: 600, color: 'var(--text-h)' }}>{c.title}</div>
-                  {c.description && (
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.125rem' }}>
-                      {c.description.slice(0, 60)}{c.description.length > 60 ? '…' : ''}
-                    </div>
-                  )}
-                </td>
-                <td><span className={`badge ${STATUS_MAP[c.status] || 'badge-pending'}`}>{c.status}</span></td>
-                <td style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                  {new Date(c.created_at).toLocaleDateString()}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap' }}>
-                    {c.status !== 'active' && (
-                      <button className="btn btn-sm" style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--success)', border: '1px solid rgba(34,197,94,0.3)' }} onClick={() => onStatus(c.id, 'active')}>Activate</button>
-                    )}
-                    {c.status === 'active' && (
-                      <button className="btn btn-sm" style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--warning)', border: '1px solid rgba(245,158,11,0.3)' }} onClick={() => onStatus(c.id, 'closed')}>Close</button>
-                    )}
-                    {c.status !== 'upcoming' && c.status !== 'active' && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => onStatus(c.id, 'upcoming')}>Reopen</button>
-                    )}
-                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => onDelete(c.id)}>Delete</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div style={{ display: 'grid', gap: '0.75rem' }}>
+      {contests.map(c => {
+        const contestRows = entries.filter(entry => entry.contest_id === c.id)
+        const totalVotes = contestRows.reduce((sum, row) => sum + (row.contest_votes?.length || 0), 0)
+        const sortedEntries = [...contestRows].sort((a, b) => (b.contest_votes?.length || 0) - (a.contest_votes?.length || 0))
+
+        return (
+          <div key={c.id} className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--text-h)', fontSize: '1rem' }}>{c.title}</div>
+                {c.description && <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>{c.description}</div>}
+                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span className={`badge ${STATUS_MAP[c.status] || 'badge-pending'}`}>{c.status}</span>
+                  <span className="badge badge-fan">Entries: {contestRows.length}</span>
+                  <span className="badge badge-fan">Votes: {totalVotes}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {['draft', 'active', 'voting', 'closed'].map(status => (
+                  <button
+                    key={status}
+                    className="btn btn-sm btn-outline"
+                    disabled={c.status === status}
+                    onClick={() => onStatus(c.id, status)}
+                  >
+                    {status}
+                  </button>
+                ))}
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }} onClick={() => onDelete(c.id)}>Delete</button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '1rem' }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Entries</div>
+              {sortedEntries.length === 0 ? (
+                <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>No entries yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                  {sortedEntries.map(entry => {
+                    const votes = entry.contest_votes?.length || 0
+                    return (
+                      <div key={entry.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '0.625rem 0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{entry.songs?.title || 'Untitled song'}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Votes: {votes}</div>
+                        </div>
+                        <button className="btn btn-sm btn-primary" onClick={() => onMarkWinner(c.id, entry)}>
+                          Mark Winner
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
