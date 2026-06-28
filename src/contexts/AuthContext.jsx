@@ -135,52 +135,67 @@ export function AuthProvider({ children }) {
   }
 
   async function signUp({ email, password, displayName, role = 'fan', agreements = {} }) {
-    const now = new Date().toISOString()
-    const acceptedTerms = agreements.acceptedTerms === true
-    const acceptedPrivacy = agreements.acceptedPrivacy === true
-    const acceptedArtistAgreement = role === 'artist' && agreements.acceptedArtistAgreement === true
+    try {
+      const now = new Date().toISOString()
+      const acceptedTerms = agreements.acceptedTerms === true
+      const acceptedPrivacy = agreements.acceptedPrivacy === true
+      const acceptedArtistAgreement = role === 'artist' && agreements.acceptedArtistAgreement === true
 
-    const signupResult = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          display_name: displayName,
-          role,
-          accepted_terms: acceptedTerms,
-          accepted_privacy: acceptedPrivacy,
-          accepted_artist_agreement: acceptedArtistAgreement,
-          accepted_terms_at: acceptedTerms ? now : null,
-          accepted_privacy_at: acceptedPrivacy ? now : null,
-          accepted_artist_agreement_at: acceptedArtistAgreement ? now : null,
+      const signupResult = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            display_name: displayName,
+            role,
+            accepted_terms: acceptedTerms,
+            accepted_privacy: acceptedPrivacy,
+            accepted_artist_agreement: acceptedArtistAgreement,
+            accepted_terms_at: acceptedTerms ? now : null,
+            accepted_privacy_at: acceptedPrivacy ? now : null,
+            accepted_artist_agreement_at: acceptedArtistAgreement ? now : null,
+          },
         },
-      },
-    })
+      })
 
-    if (signupResult.error) return signupResult
+      if (signupResult.error) {
+        console.error('SIGNUP ERROR', signupResult.error)
+        return signupResult
+      }
 
-    const authUser = signupResult.data?.user
-    if (!authUser?.id) return signupResult
+      const authUser = signupResult.data?.user
+      if (!authUser?.id) return signupResult
 
-    const profilePayload = {
-      id: authUser.id,
-      email,
-      display_name: displayName,
-      role,
-      accepted_terms: acceptedTerms,
-      accepted_privacy: acceptedPrivacy,
-      accepted_artist_agreement: acceptedArtistAgreement,
-      accepted_terms_at: acceptedTerms ? now : null,
-      accepted_privacy_at: acceptedPrivacy ? now : null,
-      accepted_artist_agreement_at: acceptedArtistAgreement ? now : null,
+      const profilePayload = {
+        id: authUser.id,
+        email,
+        display_name: displayName,
+        role,
+        accepted_terms: acceptedTerms,
+        accepted_privacy: acceptedPrivacy,
+        accepted_artist_agreement: acceptedArtistAgreement,
+        accepted_terms_at: acceptedTerms ? now : null,
+        accepted_privacy_at: acceptedPrivacy ? now : null,
+        accepted_artist_agreement_at: acceptedArtistAgreement ? now : null,
+      }
+
+      const { error: profileError } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' })
+      if (profileError) {
+        console.error('SIGNUP ERROR', profileError)
+        return {
+          data: signupResult.data,
+          error: {
+            ...profileError,
+            message: profileError.message || profileError.details || 'Failed to save agreement tracking to profile.',
+          },
+        }
+      }
+
+      return signupResult
+    } catch (error) {
+      console.error('SIGNUP ERROR', error)
+      return { data: null, error }
     }
-
-    const { error: profileError } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' })
-    if (profileError) {
-      return { data: signupResult.data, error: profileError }
-    }
-
-    return signupResult
   }
 
   async function signIn({ email, password }) {

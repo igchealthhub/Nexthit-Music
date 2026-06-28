@@ -7,6 +7,19 @@ const ROLES = [
   { value: 'artist', icon: '🎤', name: 'Artist', desc: 'Upload & promote your music' },
 ]
 
+function formatSignupError(error) {
+  if (!error) return 'Signup failed. Please try again.'
+
+  const parts = [error.message, error.details, error.hint, error.code].filter(Boolean)
+  if (parts.length > 0) return parts.join(' | ')
+
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return 'Signup failed. Please try again.'
+  }
+}
+
 export default function SignupPage() {
   const { signUp } = useAuth()
 
@@ -25,18 +38,31 @@ export default function SignupPage() {
       return
     }
     if (form.password.length < 6) { setError('Password must be at least 6 characters.'); return }
-    setLoading(true)
-    const { error } = await signUp({
-      ...form,
-      agreements: {
-        acceptedTerms: acceptedRequiredTerms,
-        acceptedPrivacy: acceptedRequiredTerms,
-        acceptedArtistAgreement,
-      },
-    })
-    setLoading(false)
-    if (error) { setError(error.message); return }
-    setSuccess(true)
+
+    try {
+      setLoading(true)
+      const { error } = await signUp({
+        ...form,
+        agreements: {
+          acceptedTerms: acceptedRequiredTerms,
+          acceptedPrivacy: acceptedRequiredTerms,
+          acceptedArtistAgreement,
+        },
+      })
+
+      if (error) {
+        console.error('SIGNUP ERROR', error)
+        setError(formatSignupError(error))
+        return
+      }
+
+      setSuccess(true)
+    } catch (error) {
+      console.error('SIGNUP ERROR', error)
+      setError(formatSignupError(error))
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (success) {
@@ -59,6 +85,7 @@ export default function SignupPage() {
         <p className="subtitle">Join NextHit and discover the next hit</p>
 
         {error && <div className="alert alert-error">{error}</div>}
+        {loading && <div className="alert alert-info">Creating your account…</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
