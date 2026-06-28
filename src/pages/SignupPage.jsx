@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 const ROLES = [
@@ -9,9 +9,10 @@ const ROLES = [
 
 export default function SignupPage() {
   const { signUp } = useAuth()
-  const navigate = useNavigate()
 
   const [form, setForm] = useState({ email: '', password: '', displayName: '', role: 'fan' })
+  const [acceptedRequiredTerms, setAcceptedRequiredTerms] = useState(false)
+  const [acceptedArtistAgreement, setAcceptedArtistAgreement] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -19,9 +20,20 @@ export default function SignupPage() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    if (!acceptedRequiredTerms || (form.role === 'artist' && !acceptedArtistAgreement)) {
+      setError('You must agree to the required terms before creating an account.')
+      return
+    }
     if (form.password.length < 6) { setError('Password must be at least 6 characters.'); return }
     setLoading(true)
-    const { error } = await signUp(form)
+    const { error } = await signUp({
+      ...form,
+      agreements: {
+        acceptedTerms: acceptedRequiredTerms,
+        acceptedPrivacy: acceptedRequiredTerms,
+        acceptedArtistAgreement,
+      },
+    })
     setLoading(false)
     if (error) { setError(error.message); return }
     setSuccess(true)
@@ -90,7 +102,10 @@ export default function SignupPage() {
                 <div
                   key={r.value}
                   className={`role-option ${form.role === r.value ? 'selected' : ''}`}
-                  onClick={() => setForm({ ...form, role: r.value })}
+                  onClick={() => {
+                    setForm({ ...form, role: r.value })
+                    if (r.value !== 'artist') setAcceptedArtistAgreement(false)
+                  }}
                 >
                   <div className="role-icon">{r.icon}</div>
                   <div className="role-name">{r.name}</div>
@@ -99,6 +114,36 @@ export default function SignupPage() {
               ))}
             </div>
           </div>
+
+          <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontWeight: 400, color: 'var(--text)' }}>
+              <input
+                type="checkbox"
+                checked={acceptedRequiredTerms}
+                onChange={e => setAcceptedRequiredTerms(e.target.checked)}
+                style={{ marginTop: '0.25rem' }}
+              />
+              <span>
+                I agree to the <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link>.
+              </span>
+            </label>
+          </div>
+
+          {form.role === 'artist' && (
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontWeight: 400, color: 'var(--text)' }}>
+                <input
+                  type="checkbox"
+                  checked={acceptedArtistAgreement}
+                  onChange={e => setAcceptedArtistAgreement(e.target.checked)}
+                  style={{ marginTop: '0.25rem' }}
+                />
+                <span>
+                  I agree to the <Link to="/artist-agreement">Artist Agreement &amp; Revenue Sharing Terms</Link>.
+                </span>
+              </label>
+            </div>
+          )}
 
           <button className="btn btn-primary btn-block btn-lg" type="submit" disabled={loading}>
             {loading ? 'Creating account…' : 'Create account'}

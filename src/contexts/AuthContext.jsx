@@ -91,6 +91,12 @@ export function AuthProvider({ children }) {
           display_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || null,
           role: currentUser?.user_metadata?.role || 'fan',
           is_admin: currentUser?.user_metadata?.is_admin || false,
+          accepted_terms: currentUser?.user_metadata?.accepted_terms === true,
+          accepted_privacy: currentUser?.user_metadata?.accepted_privacy === true,
+          accepted_artist_agreement: currentUser?.user_metadata?.accepted_artist_agreement === true,
+          accepted_terms_at: currentUser?.user_metadata?.accepted_terms_at || null,
+          accepted_privacy_at: currentUser?.user_metadata?.accepted_privacy_at || null,
+          accepted_artist_agreement_at: currentUser?.user_metadata?.accepted_artist_agreement_at || null,
         }
         const { data: newProfile, error: insertError } = await supabase
           .from('profiles')
@@ -128,12 +134,53 @@ export function AuthProvider({ children }) {
     return await fetchProfile(user.id, user)
   }
 
-  async function signUp({ email, password, displayName, role = 'fan' }) {
-    return await supabase.auth.signUp({
+  async function signUp({ email, password, displayName, role = 'fan', agreements = {} }) {
+    const now = new Date().toISOString()
+    const acceptedTerms = agreements.acceptedTerms === true
+    const acceptedPrivacy = agreements.acceptedPrivacy === true
+    const acceptedArtistAgreement = role === 'artist' && agreements.acceptedArtistAgreement === true
+
+    const signupResult = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName, role } },
+      options: {
+        data: {
+          display_name: displayName,
+          role,
+          accepted_terms: acceptedTerms,
+          accepted_privacy: acceptedPrivacy,
+          accepted_artist_agreement: acceptedArtistAgreement,
+          accepted_terms_at: acceptedTerms ? now : null,
+          accepted_privacy_at: acceptedPrivacy ? now : null,
+          accepted_artist_agreement_at: acceptedArtistAgreement ? now : null,
+        },
+      },
     })
+
+    if (signupResult.error) return signupResult
+
+    const authUser = signupResult.data?.user
+    if (!authUser?.id) return signupResult
+
+    const profilePayload = {
+      id: authUser.id,
+      email,
+      display_name: displayName,
+      role,
+      accepted_terms: acceptedTerms,
+      accepted_privacy: acceptedPrivacy,
+      accepted_artist_agreement: acceptedArtistAgreement,
+      accepted_terms_at: acceptedTerms ? now : null,
+      accepted_privacy_at: acceptedPrivacy ? now : null,
+      accepted_artist_agreement_at: acceptedArtistAgreement ? now : null,
+    }
+
+    const { error: profileError } = await supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' })
+    if (profileError) {
+      return { data: signupResult.data, error: profileError }
+    }
+
+    return signupResult
   }
 
   async function signIn({ email, password }) {

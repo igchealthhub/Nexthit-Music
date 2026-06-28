@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -25,6 +25,9 @@ import TrendingPage from './pages/TrendingPage'
 import LivestreamsPage from './pages/LivestreamsPage'
 import MessagesPage from './pages/MessagesPage'
 import PlaylistDetailPage from './pages/PlaylistDetailPage'
+import TermsPage from './pages/TermsPage'
+import PrivacyPage from './pages/PrivacyPage'
+import ArtistAgreementPage from './pages/ArtistAgreementPage'
 
 import './App.css'
 
@@ -77,8 +80,21 @@ export default function App() {
               <Route path="/messages" element={
                 <ProtectedRoute><MessagesPage /></ProtectedRoute>
               } />
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/artist-agreement" element={<ArtistAgreementPage />} />
             </Routes>
           </main>
+          <footer className="app-footer">
+            <div className="app-footer-inner">
+              <span>NextHit Music</span>
+              <div className="app-footer-links">
+                <Link to="/terms">Terms of Service</Link>
+                <Link to="/privacy">Privacy Policy</Link>
+                <Link to="/artist-agreement">Artist Agreement</Link>
+              </div>
+            </div>
+          </footer>
         </div>
       </AuthProvider>
     </BrowserRouter>
