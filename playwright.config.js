@@ -10,6 +10,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   retries: process.env.CI ? 2 : 0,
+  forbidOnly: !!process.env.CI,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: BASE_URL,
@@ -25,8 +26,16 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'desktop-chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'mobile-iphone',
+      use: { ...devices['iPhone 14'], browserName: 'chromium' },
+    },
+    {
+      name: 'tablet-ipad',
+      use: { ...devices['iPad Pro 11'], browserName: 'chromium' },
     },
   ],
 })

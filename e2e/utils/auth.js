@@ -15,8 +15,8 @@ export async function login(page, role) {
 
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible()
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(password)
+  await page.getByPlaceholder('you@example.com').fill(email)
+  await page.getByPlaceholder('••••••••').fill(password)
   await page.getByRole('button', { name: /sign in/i }).click()
 }
 
