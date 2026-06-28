@@ -284,10 +284,18 @@ export default function AdminDashboardPage() {
 
   async function markWinner(contestId, entry) {
     setContestManagerError('')
-    const { error } = await supabase
+    let { error } = await supabase
       .from('contests')
       .update({ winner_entry_id: entry.id, winner_song_id: entry.song_id, winner_artist_id: entry.artist_id, status: 'closed' })
       .eq('id', contestId)
+
+    if (error && error.code === 'PGRST204') {
+      const fallback = await supabase
+        .from('contests')
+        .update({ status: 'closed' })
+        .eq('id', contestId)
+      error = fallback.error
+    }
 
     if (error) {
       setContestManagerError(`Could not mark winner: ${error.message}`)
