@@ -499,7 +499,7 @@ export default function AdminDashboardPage() {
               >{t.label}</button>
             ))}
             <button className="btn btn-sm btn-ghost" onClick={loadAll}>↺ Refresh</button>
-            <button className="btn btn-sm btn-ghost" onClick={loadPendingSongs}>🧪 Refresh Pending</button>
+            <button className="btn btn-sm btn-ghost" onClick={loadPendingSongs}>🧪 Refresh Pending ({pendingSongs.length})</button>
           </div>
 
           {/* Song tabs */}

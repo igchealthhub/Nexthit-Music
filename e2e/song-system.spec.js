@@ -59,6 +59,43 @@ test.describe('Song system', () => {
     assertNoSupabaseFailures(monitors)
   })
 
+  test('artist pending upload appears for admin and becomes public after approval', async ({ page }) => {
+    const monitors = attachFailureMonitors(page)
+    const artist = credentialsFor('artist')
+    const admin = credentialsFor('admin')
+    test.skip(!artist.email || !artist.password, 'Set E2E_ARTIST_EMAIL and E2E_ARTIST_PASSWORD.')
+    test.skip(!admin.email || !admin.password, 'Set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD.')
+    test.skip(!uploadAudioPath, 'Set E2E_UPLOAD_AUDIO_PATH.')
+
+    const title = `E2E Pending Flow ${Date.now()}`
+
+    await login(page, 'artist')
+    await page.goto('/upload/song')
+    await page.getByPlaceholder('My Amazing Track').fill(title)
+    await page.locator('#audio-input').setInputFiles(uploadAudioPath)
+    await page.getByRole('button', { name: /submit for review/i }).click()
+    await expect(page.locator('body')).toContainText(/song submitted for review/i)
+
+    await page.goto('/songs')
+    await expect(page.locator('body')).not.toContainText(title)
+
+    await login(page, 'admin')
+    await page.goto('/admin')
+    await expect(page.getByRole('heading', { name: /admin dashboard/i })).toBeVisible()
+    await page.getByRole('button', { name: /pending/i }).first().click()
+    await expect(page.locator('body')).toContainText(title)
+
+    const pendingRow = page.locator('tr').filter({ hasText: title }).first()
+    await pendingRow.getByRole('button', { name: /approve/i }).click()
+    await expect(page.locator('body')).not.toContainText(/update failed|no song was updated/i)
+
+    await page.goto('/songs')
+    await expect(page.locator('body')).toContainText(title)
+
+    await assertNoCriticalClientFailures(page, monitors)
+    assertNoSupabaseFailures(monitors)
+  })
+
   test('songs browse, play, search, and genre tags', async ({ page }) => {
     const monitors = attachFailureMonitors(page)
     await page.goto('/songs')

@@ -29,6 +29,9 @@ export default function UploadSongPage() {
     audioUploaded: false,
     coverUploaded: false,
     dbInsertOk: false,
+    artistProfileId: null,
+    insertedSongId: null,
+    insertedStatus: null,
   })
 
   // Validate by extension — iOS/Safari often reports audio files as
@@ -153,7 +156,15 @@ export default function UploadSongPage() {
     setSuccess(false)
     setSuccessMessage('')
     setSupabaseError(null)
-    setDiagnostics({ authOk: false, audioUploaded: false, coverUploaded: false, dbInsertOk: false })
+    setDiagnostics({
+      authOk: false,
+      audioUploaded: false,
+      coverUploaded: false,
+      dbInsertOk: false,
+      artistProfileId: null,
+      insertedSongId: null,
+      insertedStatus: null,
+    })
 
     if (!form.title.trim()) { setError('Song title is required.'); return }
     if (!audioFile) { setError('Please select an audio file.'); return }
@@ -171,6 +182,33 @@ export default function UploadSongPage() {
       console.log('[UploadSong] selected cover file:', coverFile)
 
       setDiagnostics(prev => ({ ...prev, authOk: true }))
+
+      // Keep artist linkage explicit for song insert diagnostics and FK safety.
+      const { data: existingArtistProfile, error: artistProfileError } = await supabase
+        .from('artist_profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (artistProfileError) {
+        throw new Error(`Could not verify artist profile: ${artistProfileError.message}`)
+      }
+
+      if (!existingArtistProfile?.id) {
+        const { data: insertedArtistProfile, error: createArtistProfileError } = await supabase
+          .from('artist_profiles')
+          .insert({ id: user.id })
+          .select('id')
+          .single()
+
+        if (createArtistProfileError) {
+          throw new Error(`Could not create artist profile row: ${createArtistProfileError.message}`)
+        }
+
+        setDiagnostics(prev => ({ ...prev, artistProfileId: insertedArtistProfile.id }))
+      } else {
+        setDiagnostics(prev => ({ ...prev, artistProfileId: existingArtistProfile.id }))
+      }
 
       // Upload audio
       setProgress('Uploading audio…')
@@ -210,7 +248,12 @@ export default function UploadSongPage() {
 
       const inserted = await insertSongRow(songRow)
       console.log('[UploadSong] Row created successfully:', inserted)
-      setDiagnostics(prev => ({ ...prev, dbInsertOk: true }))
+      setDiagnostics(prev => ({
+        ...prev,
+        dbInsertOk: true,
+        insertedSongId: inserted.id,
+        insertedStatus: inserted.status,
+      }))
 
       if (inserted?.status === 'pending') {
         setProgress('Notifying admins…')
@@ -384,9 +427,12 @@ export default function UploadSongPage() {
             <strong style={{ display: 'block', marginBottom: '0.75rem' }}>Upload diagnostics</strong>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <div>Auth OK</div><div>{diagnostics.authOk ? '✅' : '⏳'}</div>
+              <div>Artist profile id</div><div>{diagnostics.artistProfileId || '⏳'}</div>
               <div>Audio uploaded</div><div>{diagnostics.audioUploaded ? '✅' : '⏳'}</div>
               <div>Cover uploaded</div><div>{coverFile ? (diagnostics.coverUploaded ? '✅' : '⏳') : 'n/a'}</div>
               <div>DB insert OK</div><div>{diagnostics.dbInsertOk ? '✅' : '⏳'}</div>
+              <div>Inserted song id</div><div>{diagnostics.insertedSongId || '⏳'}</div>
+              <div>Inserted status</div><div>{diagnostics.insertedStatus || '⏳'}</div>
             </div>
           </div>
 
