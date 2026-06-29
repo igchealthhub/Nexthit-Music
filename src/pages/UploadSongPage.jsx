@@ -8,6 +8,9 @@ const FALLBACK_GENRES = [
   'Country', 'Soul', 'Afrobeats', 'Reggae', 'Latin', 'Classical', 'Other',
 ]
 
+const AUDIO_BUCKETS = ['songs', 'song-files']
+const COVER_BUCKETS = ['covers', 'cover-art']
+
 export default function UploadSongPage() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
@@ -32,6 +35,11 @@ export default function UploadSongPage() {
     artistProfileId: null,
     insertedSongId: null,
     insertedStatus: null,
+    insertArtistId: null,
+    insertPayload: null,
+    insertErrorObject: null,
+    rlsLikelyBlocked: false,
+    songsArtistForeignKey: 'unknown',
   })
 
   // Validate by extension — iOS/Safari often reports audio files as
@@ -80,30 +88,45 @@ export default function UploadSongPage() {
     setCoverPreview(URL.createObjectURL(file))
   }
 
-  async function uploadFile(bucket, path, file) {
-    console.log(`[UploadSong] Uploading to bucket: ${bucket}`, { bucket, path, file })
-    const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-    })
+  function shouldTryNextBucket(error) {
+    const message = (error?.message || '').toLowerCase()
+    return message.includes('bucket') || message.includes('not found') || message.includes('does not exist')
+  }
 
-    console.log(`[UploadSong] Storage upload result for ${bucket}`, { bucket, path, data, error })
+  async function uploadFile(buckets, path, file, label) {
+    let lastError = null
 
-    if (error) {
-      console.error(`[UploadSong] Storage upload failed for bucket ${bucket}`, error)
-      throw new Error(`Storage upload failed (${bucket}): ${error.message}`)
+    for (const bucket of buckets) {
+      console.log(`[UploadSong] Uploading ${label} to bucket`, { bucket, path, fileName: file?.name, size: file?.size })
+      const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+      })
+
+      console.log(`[UploadSong] ${label} upload result`, { bucket, path, data, error })
+
+      if (error) {
+        lastError = error
+        if (shouldTryNextBucket(error)) {
+          continue
+        }
+        throw new Error(`Failed to upload ${label} to ${bucket}: ${error.message}`)
+      }
+
+      const { data: urlData, error: urlError } = supabase.storage.from(bucket).getPublicUrl(path)
+      if (urlError) {
+        console.error('[UploadSong] getPublicUrl error', { bucket, path, urlError })
+        throw new Error(`Upload succeeded, but URL generation failed for ${label} (${bucket}): ${urlError.message}`)
+      }
+      if (!urlData?.publicUrl) {
+        throw new Error(`Upload succeeded, but URL is missing for ${label} (${bucket}).`)
+      }
+
+      return { url: urlData.publicUrl, bucket }
     }
 
-    const { data: urlData, error: urlError } = supabase.storage.from(bucket).getPublicUrl(path)
-    if (urlError) {
-      console.error('[UploadSong] getPublicUrl error', { bucket, path, urlError })
-      throw new Error(`Failed to get public URL for uploaded file (${bucket}): ${urlError.message}`)
-    }
-    if (!urlData?.publicUrl) {
-      throw new Error(`Uploaded file URL not available for ${bucket} at path ${path}`)
-    }
-
-    return urlData.publicUrl
+    const bucketList = buckets.join(', ')
+    throw new Error(`Could not upload ${label}. Checked buckets [${bucketList}]. Last error: ${lastError?.message || 'unknown error'}`)
   }
 
   async function insertSongRow(songRow) {
@@ -159,11 +182,16 @@ export default function UploadSongPage() {
 
     if (error) {
       console.error('[UploadSong] songs insert failed', error)
+      const isPermission = error.code === '42501' || /permission denied|row-level security/i.test(error.message || '')
       const normalizedError = {
-        message: error.message || 'Database insert failed for song.',
+        message: isPermission
+          ? 'Database insert blocked by RLS policy on songs. Run supabase/songs_admin_pending_rls.sql and try again.'
+          : (error.message || 'Database insert failed for song.'),
         details: error.details || null,
         hint: error.hint || null,
         code: error.code || null,
+        rawError: error,
+        rlsLikelyBlocked: isPermission,
       }
       throw normalizedError
     }
@@ -173,6 +201,111 @@ export default function UploadSongPage() {
     }
 
     return data
+  }
+
+  async function loadSongsSchemaDiagnostics() {
+    const { data, error: rpcError } = await supabase.rpc('song_insert_diagnostics')
+    console.log('[UploadSong] song_insert_diagnostics result', { data, rpcError })
+
+    if (rpcError || !data) {
+      setDiagnostics(prev => ({
+        ...prev,
+        songsArtistForeignKey: 'unknown (run supabase/song_insert_diagnostics.sql)',
+      }))
+      return
+    }
+
+    const fk = data?.songs_artist_fk_target || 'unknown'
+    setDiagnostics(prev => ({
+      ...prev,
+      songsArtistForeignKey: fk,
+    }))
+  }
+
+  async function resolveArtistOwnerId(authUserId) {
+    let profileRow = null
+    let lookupMode = 'id'
+
+    const byId = await supabase
+      .from('artist_profiles')
+      .select('id')
+      .eq('id', authUserId)
+      .maybeSingle()
+
+    console.log('[UploadSong] artist profile lookup by id', {
+      authUserId,
+      data: byId.data,
+      error: byId.error,
+    })
+
+    if (byId.error) {
+      throw new Error(`Could not query artist_profiles by id: ${byId.error.message}`)
+    }
+
+    if (byId.data?.id) {
+      profileRow = byId.data
+      lookupMode = 'id'
+    }
+
+    if (!profileRow) {
+      const byUserId = await supabase
+        .from('artist_profiles')
+        .select('id, user_id')
+        .eq('user_id', authUserId)
+        .maybeSingle()
+
+      console.log('[UploadSong] artist profile lookup by user_id', {
+        authUserId,
+        data: byUserId.data,
+        error: byUserId.error,
+      })
+
+      if (byUserId.error && byUserId.error.code !== 'PGRST204') {
+        throw new Error(`Could not query artist_profiles by user_id: ${byUserId.error.message}`)
+      }
+
+      if (byUserId.data?.id) {
+        profileRow = byUserId.data
+        lookupMode = 'user_id'
+      }
+    }
+
+    if (!profileRow) {
+      const insertById = await supabase
+        .from('artist_profiles')
+        .insert({ id: authUserId })
+        .select('id')
+        .single()
+
+      if (!insertById.error && insertById.data?.id) {
+        profileRow = insertById.data
+        lookupMode = 'id-created'
+      } else {
+        const insertByUserId = await supabase
+          .from('artist_profiles')
+          .insert({ user_id: authUserId })
+          .select('id, user_id')
+          .single()
+
+        if (insertByUserId.error) {
+          throw new Error(`Could not create artist profile row: ${insertByUserId.error.message}`)
+        }
+
+        profileRow = insertByUserId.data
+        lookupMode = 'user_id-created'
+      }
+    }
+
+    console.log('[UploadSong] resolved artist owner id', {
+      authUserId,
+      artistProfileId: profileRow?.id || null,
+      lookupMode,
+    })
+
+    return {
+      artistProfileId: profileRow?.id || null,
+      lookupMode,
+    }
   }
 
   async function notifyAdminsOfPendingSong(song) {
@@ -201,6 +334,11 @@ export default function UploadSongPage() {
       artistProfileId: null,
       insertedSongId: null,
       insertedStatus: null,
+      insertArtistId: null,
+      insertPayload: null,
+      insertErrorObject: null,
+      rlsLikelyBlocked: false,
+      songsArtistForeignKey: 'unknown',
     })
 
     if (!form.title.trim()) { setError('Song title is required.'); return }
@@ -221,38 +359,22 @@ export default function UploadSongPage() {
       setDiagnostics(prev => ({ ...prev, authOk: true }))
 
       // Keep artist linkage explicit for song insert diagnostics and FK safety.
-      const { data: existingArtistProfile, error: artistProfileError } = await supabase
-        .from('artist_profiles')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle()
-
-      if (artistProfileError) {
-        throw new Error(`Could not verify artist profile: ${artistProfileError.message}`)
+      const artistOwner = await resolveArtistOwnerId(user.id)
+      if (!artistOwner.artistProfileId) {
+        throw new Error('Could not resolve artist profile id for song insert.')
       }
 
-      if (!existingArtistProfile?.id) {
-        const { data: insertedArtistProfile, error: createArtistProfileError } = await supabase
-          .from('artist_profiles')
-          .insert({ id: user.id })
-          .select('id')
-          .single()
+      setDiagnostics(prev => ({ ...prev, artistProfileId: artistOwner.artistProfileId }))
 
-        if (createArtistProfileError) {
-          throw new Error(`Could not create artist profile row: ${createArtistProfileError.message}`)
-        }
-
-        setDiagnostics(prev => ({ ...prev, artistProfileId: insertedArtistProfile.id }))
-      } else {
-        setDiagnostics(prev => ({ ...prev, artistProfileId: existingArtistProfile.id }))
-      }
+      await loadSongsSchemaDiagnostics()
 
       // Upload audio
       setProgress('Uploading audio…')
       const audioExtension = audioFile.name.split('.').pop()?.toLowerCase() || 'mp3'
       const audioPath = `${user.id}/${timestamp}-${safeTitle}.${audioExtension}`
-      const audioUrl = await uploadFile('song-files', audioPath, audioFile)
-      console.log('[UploadSong] Audio uploaded', { audioPath, audioUrl })
+      const audioUpload = await uploadFile(AUDIO_BUCKETS, audioPath, audioFile, 'audio')
+      const audioUrl = audioUpload.url
+      console.log('[UploadSong] Audio uploaded', { audioPath, audioUrl, bucket: audioUpload.bucket })
       setDiagnostics(prev => ({ ...prev, audioUploaded: true }))
 
       // Upload cover (optional)
@@ -261,8 +383,9 @@ export default function UploadSongPage() {
         setProgress('Uploading cover art…')
         const coverExtension = coverFile.name.split('.').pop()?.toLowerCase() || 'jpg'
         const coverPath = `${user.id}/${timestamp}-${safeTitle}.${coverExtension}`
-        coverUrl = await uploadFile('cover-art', coverPath, coverFile)
-        console.log('[UploadSong] Cover uploaded', { coverPath, coverUrl })
+        const coverUpload = await uploadFile(COVER_BUCKETS, coverPath, coverFile, 'cover')
+        coverUrl = coverUpload.url
+        console.log('[UploadSong] Cover uploaded', { coverPath, coverUrl, bucket: coverUpload.bucket })
         setDiagnostics(prev => ({ ...prev, coverUploaded: true }))
       }
 
@@ -271,7 +394,7 @@ export default function UploadSongPage() {
       const priceFloat = form.price ? parseFloat(form.price) : null
       const selectedGenre = genreOptions.find(g => String(g.id) === String(form.genre_id))
       const songRow = {
-        artist_id: user.id,
+        artist_id: artistOwner.artistProfileId,
         title: form.title.trim(),
         description: form.description.trim() || null,
         genre_id: genres.length ? (form.genre_id || null) : null,
@@ -283,6 +406,12 @@ export default function UploadSongPage() {
         play_count: 0,
       }
 
+      setDiagnostics(prev => ({
+        ...prev,
+        insertArtistId: songRow.artist_id,
+        insertPayload: songRow,
+      }))
+
       console.log('[UploadSong] songs insert payload:', songRow)
 
       const inserted = await insertSongRow(songRow)
@@ -292,6 +421,8 @@ export default function UploadSongPage() {
         dbInsertOk: true,
         insertedSongId: inserted.id,
         insertedStatus: inserted.status,
+        insertErrorObject: null,
+        rlsLikelyBlocked: false,
       }))
 
       if (inserted?.status === 'pending') {
@@ -308,10 +439,16 @@ export default function UploadSongPage() {
       console.error('[UploadSong] Error', err)
       const message = err?.message || 'Something went wrong while uploading the song.'
       setError(message)
+      setDiagnostics(prev => ({
+        ...prev,
+        insertErrorObject: err?.rawError || err || null,
+        rlsLikelyBlocked: err?.rlsLikelyBlocked === true,
+      }))
       setSupabaseError({
         details: err?.details || null,
         hint: err?.hint || null,
         code: err?.code || null,
+        raw: err?.rawError || err || null,
       })
     } finally {
       setUploading(false)
@@ -340,6 +477,11 @@ export default function UploadSongPage() {
                 {supabaseError.details && <div><strong>Details:</strong> {supabaseError.details}</div>}
                 {supabaseError.hint && <div><strong>Hint:</strong> {supabaseError.hint}</div>}
                 {supabaseError.code && <div><strong>Code:</strong> {supabaseError.code}</div>}
+                {supabaseError.raw && (
+                  <pre style={{ marginTop: '0.5rem', whiteSpace: 'pre-wrap' }}>
+                    {JSON.stringify(supabaseError.raw, null, 2)}
+                  </pre>
+                )}
               </div>
             )}
           </div>
@@ -472,7 +614,20 @@ export default function UploadSongPage() {
               <div>DB insert OK</div><div>{diagnostics.dbInsertOk ? '✅' : '⏳'}</div>
               <div>Inserted song id</div><div>{diagnostics.insertedSongId || '⏳'}</div>
               <div>Inserted status</div><div>{diagnostics.insertedStatus || '⏳'}</div>
+              <div>artist_id used for insert</div><div>{diagnostics.insertArtistId || '⏳'}</div>
+              <div>Songs FK target</div><div>{diagnostics.songsArtistForeignKey || 'unknown'}</div>
+              <div>RLS likely blocked insert</div><div>{diagnostics.rlsLikelyBlocked ? 'YES' : 'NO/UNKNOWN'}</div>
             </div>
+            {diagnostics.insertPayload && (
+              <pre style={{ marginTop: '0.75rem', whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
+                Insert payload: {JSON.stringify(diagnostics.insertPayload, null, 2)}
+              </pre>
+            )}
+            {diagnostics.insertErrorObject && (
+              <pre style={{ marginTop: '0.75rem', whiteSpace: 'pre-wrap', fontSize: '0.8rem', color: 'var(--error)' }}>
+                Insert error object: {JSON.stringify(diagnostics.insertErrorObject, null, 2)}
+              </pre>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
