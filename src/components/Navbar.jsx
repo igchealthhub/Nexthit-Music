@@ -19,9 +19,35 @@ export default function Navbar() {
       return
     }
 
-    // Keep badges neutral when read-count tables are unavailable to the current session.
-    setUnreadCount(0)
-    setUnreadMessages(0)
+    let cancelled = false
+
+    async function loadUnreadCounts() {
+      const [{ count: notificationsCount, error: notifError }, { count: messageCount, error: messageError }] = await Promise.all([
+        supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('read', false),
+        supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('to_user', user.id)
+          .eq('read', false),
+      ])
+
+      if (cancelled) return
+      setUnreadCount(notifError ? 0 : (notificationsCount || 0))
+      setUnreadMessages(messageError ? 0 : (messageCount || 0))
+    }
+
+    loadUnreadCounts()
+
+    const interval = setInterval(loadUnreadCounts, 30000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [user?.id])
 
   async function handleSignOut() {
@@ -89,6 +115,11 @@ export default function Navbar() {
             {isAdmin && (
               <NavLink to="/admin" onClick={close} className="nav-admin-link">
                 ⚙️ Admin
+                {unreadCount > 0 && (
+                  <span className="notif-badge" style={{ position: 'static', marginLeft: '0.4rem' }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </NavLink>
             )}
 

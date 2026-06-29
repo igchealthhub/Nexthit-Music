@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
 const TYPE_ICONS = {
+  admin_song_pending: '🛎️',
   song_approved:  '✅',
   song_rejected:  '❌',
   song_purchased: '💰',

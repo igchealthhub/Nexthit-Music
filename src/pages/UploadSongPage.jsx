@@ -135,6 +135,18 @@ export default function UploadSongPage() {
     return data
   }
 
+  async function notifyAdminsOfPendingSong(song) {
+    const { error: rpcError } = await supabase.rpc('notify_admins_song_pending', {
+      p_song_id: song.id,
+      p_song_title: song.title,
+    })
+
+    if (rpcError) {
+      console.error('[UploadSong] notify_admins_song_pending failed', rpcError)
+      throw new Error(`Song saved, but admin notification failed: ${rpcError.message}`)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -199,6 +211,12 @@ export default function UploadSongPage() {
       const inserted = await insertSongRow(songRow)
       console.log('[UploadSong] Row created successfully:', inserted)
       setDiagnostics(prev => ({ ...prev, dbInsertOk: true }))
+
+      if (inserted?.status === 'pending') {
+        setProgress('Notifying admins…')
+        await notifyAdminsOfPendingSong(inserted)
+      }
+
       setSuccess(true)
       setSuccessMessage('Song submitted for review.')
       setProgress('Submission complete — redirecting to Artist Dashboard…')

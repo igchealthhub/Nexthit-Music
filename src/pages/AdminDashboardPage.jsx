@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
@@ -37,6 +38,7 @@ export default function AdminDashboardPage() {
     status: 'draft',
   })
   const [userStats, setUserStats] = useState({ total: 0, artists: 0, fans: 0, admins: 0 })
+  const [pendingAdminAlerts, setPendingAdminAlerts] = useState(0)
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState('')
   const [debugInfo, setDebugInfo] = useState(null)
@@ -105,6 +107,17 @@ export default function AdminDashboardPage() {
 
     const contestsData = c.data ?? []
     setContests(contestsData)
+
+    if (user?.id) {
+      const { count } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false)
+      setPendingAdminAlerts(count || 0)
+    } else {
+      setPendingAdminAlerts(0)
+    }
 
     const contestIds = contestsData.map(contest => contest.id)
     if (contestIds.length) {
@@ -377,8 +390,19 @@ export default function AdminDashboardPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>⚙️ Admin Dashboard</h1>
-        <p>Review submissions, moderate content, and manage the platform</p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+          <div>
+            <h1>⚙️ Admin Dashboard</h1>
+            <p>Review submissions, moderate content, and manage the platform</p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <Link to="/notifications" className="btn btn-outline btn-sm">
+              Alerts {pendingAdminAlerts > 0 ? `(${pendingAdminAlerts})` : ''}
+            </Link>
+            <Link to="/admin/contests" className="btn btn-primary btn-sm">Manage Contests</Link>
+            <Link to="/admin/system-tools" className="btn btn-outline btn-sm">System Tools</Link>
+          </div>
+        </div>
       </div>
 
       {fetchError && (
