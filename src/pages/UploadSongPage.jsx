@@ -223,88 +223,29 @@ export default function UploadSongPage() {
   }
 
   async function resolveArtistOwnerId(authUserId) {
-    let profileRow = null
-    let lookupMode = 'id'
-
-    const byId = await supabase
+    const byUserId = await supabase
       .from('artist_profiles')
-      .select('id')
-      .eq('id', authUserId)
+      .select('id, user_id')
+      .eq('user_id', authUserId)
       .maybeSingle()
 
-    console.log('[UploadSong] artist profile lookup by id', {
+    console.log('[UploadSong] artist profile lookup by user_id', {
       authUserId,
-      data: byId.data,
-      error: byId.error,
+      data: byUserId.data,
+      error: byUserId.error,
     })
 
-    if (byId.error) {
-      throw new Error(`Could not query artist_profiles by id: ${byId.error.message}`)
+    if (byUserId.error) {
+      throw new Error(`Could not query artist_profiles by user_id: ${byUserId.error.message}`)
     }
 
-    if (byId.data?.id) {
-      profileRow = byId.data
-      lookupMode = 'id'
+    if (!byUserId.data?.id) {
+      throw new Error('No artist profile exists for this account. Please create your artist profile before uploading songs.')
     }
-
-    if (!profileRow) {
-      const byUserId = await supabase
-        .from('artist_profiles')
-        .select('id, user_id')
-        .eq('user_id', authUserId)
-        .maybeSingle()
-
-      console.log('[UploadSong] artist profile lookup by user_id', {
-        authUserId,
-        data: byUserId.data,
-        error: byUserId.error,
-      })
-
-      if (byUserId.error && byUserId.error.code !== 'PGRST204') {
-        throw new Error(`Could not query artist_profiles by user_id: ${byUserId.error.message}`)
-      }
-
-      if (byUserId.data?.id) {
-        profileRow = byUserId.data
-        lookupMode = 'user_id'
-      }
-    }
-
-    if (!profileRow) {
-      const insertById = await supabase
-        .from('artist_profiles')
-        .insert({ id: authUserId })
-        .select('id')
-        .single()
-
-      if (!insertById.error && insertById.data?.id) {
-        profileRow = insertById.data
-        lookupMode = 'id-created'
-      } else {
-        const insertByUserId = await supabase
-          .from('artist_profiles')
-          .insert({ user_id: authUserId })
-          .select('id, user_id')
-          .single()
-
-        if (insertByUserId.error) {
-          throw new Error(`Could not create artist profile row: ${insertByUserId.error.message}`)
-        }
-
-        profileRow = insertByUserId.data
-        lookupMode = 'user_id-created'
-      }
-    }
-
-    console.log('[UploadSong] resolved artist owner id', {
-      authUserId,
-      artistProfileId: profileRow?.id || null,
-      lookupMode,
-    })
 
     return {
-      artistProfileId: profileRow?.id || null,
-      lookupMode,
+      artistProfileId: byUserId.data.id,
+      lookupMode: 'user_id',
     }
   }
 
