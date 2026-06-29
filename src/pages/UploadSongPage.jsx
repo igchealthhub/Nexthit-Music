@@ -110,15 +110,52 @@ export default function UploadSongPage() {
     const attempt = { ...songRow, status: 'pending' }
     console.log('[UploadSong] songs insert attempt payload:', attempt)
 
+    // Preferred path: DB RPC enforces artist linkage and returns inserted row diagnostics.
+    const rpcResult = await supabase.rpc('create_pending_song_upload', {
+      p_title: attempt.title,
+      p_description: attempt.description,
+      p_genre_id: attempt.genre_id,
+      p_genre: attempt.genre || null,
+      p_price: attempt.price,
+      p_audio_url: attempt.audio_url,
+      p_cover_url: attempt.cover_url,
+    })
+
+    if (!rpcResult.error && rpcResult.data?.status === 'ok') {
+      const rpcSong = rpcResult.data.song || null
+      if (rpcSong?.id) {
+        return {
+          id: rpcSong.id,
+          title: rpcSong.title || attempt.title,
+          status: rpcSong.status || 'pending',
+        }
+      }
+    }
+
+    if (rpcResult.error) {
+      console.warn('[UploadSong] create_pending_song_upload RPC unavailable/failure, falling back to direct insert', rpcResult.error)
+    }
+
+    // Fallback path if RPC migration has not been applied yet.
+    const directPayload = {
+      artist_id: attempt.artist_id,
+      title: attempt.title,
+      description: attempt.description,
+      genre_id: attempt.genre_id,
+      price: attempt.price,
+      status: 'pending',
+      audio_url: attempt.audio_url,
+      cover_url: attempt.cover_url,
+      created_at: new Date().toISOString(),
+    }
+
     const { data, error } = await supabase
       .from('songs')
-      .insert([attempt])
+      .insert([directPayload])
       .select('id, title, status')
       .single()
 
-    console.log('[UploadSong] songs insert result:', { data, error })
-    console.log('SONG INSERT PAYLOAD', attempt)
-    console.log('SONG INSERT ERROR', error)
+    console.log('[UploadSong] songs direct insert result:', { data, error })
 
     if (error) {
       console.error('[UploadSong] songs insert failed', error)
@@ -232,11 +269,13 @@ export default function UploadSongPage() {
       // Insert song row
       setProgress('Saving song…')
       const priceFloat = form.price ? parseFloat(form.price) : null
+      const selectedGenre = genreOptions.find(g => String(g.id) === String(form.genre_id))
       const songRow = {
         artist_id: user.id,
         title: form.title.trim(),
         description: form.description.trim() || null,
-        genre_id: form.genre_id || null,
+        genre_id: genres.length ? (form.genre_id || null) : null,
+        genre: genres.length ? null : (selectedGenre?.name || null),
         audio_url: audioUrl,
         cover_url: coverUrl,
         price: Number.isNaN(priceFloat) ? null : priceFloat,
