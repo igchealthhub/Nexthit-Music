@@ -11,18 +11,17 @@ const STATUS_COLORS = {
 }
 
 export default function ContestsPage() {
-  const { user } = useAuth()
+  const { profile } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [contests, setContests] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all')
   const [error, setError] = useState('')
   const [routeMessage, setRouteMessage] = useState('')
 
   useEffect(() => {
     loadContests()
-  }, [user])
+  }, [profile?.is_admin])
 
   useEffect(() => {
     const incomingMessage = location.state?.message
@@ -33,20 +32,21 @@ export default function ContestsPage() {
   }, [location.state, navigate])
 
   async function loadContests() {
-    if (!user) {
-      setContests([])
-      setError('')
-      setLoading(false)
-      return
-    }
-
     setLoading(true)
     setError('')
 
-    const { data, error: fetchError } = await supabase
+    const isAdmin = profile?.is_admin === true
+
+    let query = supabase
       .from('contests')
-      .select('*, contest_entries(id)')
+      .select('id, title, description, prize, entry_fee, start_date, end_date, status, contest_entries(id)')
       .order('created_at', { ascending: false })
+
+    if (!isAdmin) {
+      query = query.eq('status', 'active')
+    }
+
+    const { data, error: fetchError } = await query
 
     if (fetchError) {
       setError(fetchError.message)
@@ -59,25 +59,22 @@ export default function ContestsPage() {
     setLoading(false)
   }
 
-  const filtered = filter === 'all' ? contests : contests.filter(c => c.status === filter)
+  function formatDate(value) {
+    if (!value) return '—'
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+  }
+
+  function formatMoney(value) {
+    const numeric = Number(value || 0)
+    return numeric > 0 ? `$${numeric.toFixed(2)}` : 'Free'
+  }
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>🎤 Contests</h1>
-        <p>Compete, vote, and discover the next big artist</p>
-      </div>
-
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        {['all', 'draft', 'active', 'voting', 'closed'].map(f => (
-          <button
-            key={f}
-            className={`btn btn-sm ${filter === f ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setFilter(f)}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
+        <p>{profile?.is_admin ? 'All contests (admin view)' : 'Active contests open for entries and voting'}</p>
       </div>
 
       {error && (
@@ -94,21 +91,15 @@ export default function ContestsPage() {
 
       {loading ? (
         <div className="loading-screen"><div className="spinner" /></div>
-      ) : !user ? (
+      ) : contests.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">🎤</div>
-          <h3>Log in to view contests</h3>
-          <p>Contest entries and voting are available for signed-in users.</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon">🎤</div>
-          <h3>No contests {filter !== 'all' ? `with status "${filter}"` : 'yet'}</h3>
-          <p>Contests will appear here. Come back soon!</p>
+          <h3>No active contests yet</h3>
+          <p>Check back soon for the next live contest.</p>
         </div>
       ) : (
         <div className="grid-2">
-          {filtered.map(c => {
+          {contests.map(c => {
             const entryCount = c.contest_entries?.length || 0
             return (
               <div key={c.id} className="card">
@@ -123,17 +114,16 @@ export default function ContestsPage() {
                     {c.description}
                   </p>
                 )}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                    {entryCount} {entryCount === 1 ? 'entry' : 'entries'} · {new Date(c.created_at).toLocaleDateString()}
-                  </div>
-                  <Link
-                    to={`/contests/${c.id}`}
-                    className={`btn btn-sm ${c.status === 'active' || c.status === 'voting' ? 'btn-primary' : 'btn-outline'}`}
-                  >
-                    {c.status === 'active' || c.status === 'voting' ? '🗳️ Vote & Enter' : '🔍 View'}
-                  </Link>
+                <div style={{ display: 'grid', gap: '0.35rem', marginBottom: '1rem', fontSize: '0.875rem', color: 'var(--text)' }}>
+                  <div><strong>Prize:</strong> {c.prize || '—'}</div>
+                  <div><strong>Entry Fee:</strong> {formatMoney(c.entry_fee)}</div>
+                  <div><strong>Start:</strong> {formatDate(c.start_date)}</div>
+                  <div><strong>End:</strong> {formatDate(c.end_date)}</div>
+                  <div><strong>Entries:</strong> {entryCount}</div>
                 </div>
+                <Link to={`/contests/${c.id}`} className="btn btn-primary btn-sm">
+                  🗳️ Enter Contest
+                </Link>
               </div>
             )
           })}
