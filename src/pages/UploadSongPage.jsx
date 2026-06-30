@@ -29,18 +29,33 @@ export default function UploadSongPage() {
   const [progress, setProgress] = useState('')
   const [diagnostics, setDiagnostics] = useState({
     authOk: false,
+    currentAuthUserId: null,
     audioUploaded: false,
     coverUploaded: false,
     dbInsertOk: false,
     artistProfileId: null,
+    artistProfileUserId: null,
     insertedSongId: null,
     insertedStatus: null,
     insertArtistId: null,
     insertPayload: null,
     insertErrorObject: null,
+    insertResponseData: null,
     rlsLikelyBlocked: false,
     songsArtistForeignKey: 'unknown',
   })
+
+  function hasMeaningfulError(value) {
+    if (!value) return false
+    if (typeof value === 'string') return value.trim().length > 0
+    if (typeof value !== 'object') return true
+    return Object.values(value).some(v => {
+      if (v === null || v === undefined) return false
+      if (typeof v === 'string') return v.trim().length > 0
+      if (typeof v === 'object') return Object.keys(v).length > 0
+      return true
+    })
+  }
 
   // Validate by extension — iOS/Safari often reports audio files as
   // application/octet-stream, so MIME-type checks alone will reject them.
@@ -132,35 +147,12 @@ export default function UploadSongPage() {
   async function insertSongRow(songRow) {
     const attempt = { ...songRow, status: 'pending' }
     console.log('[UploadSong] songs insert attempt payload:', attempt)
-
-    // Preferred path: DB RPC enforces artist linkage and returns inserted row diagnostics.
-    const rpcResult = await supabase.rpc('create_pending_song_upload', {
-      p_title: attempt.title,
-      p_description: attempt.description,
-      p_genre_id: attempt.genre_id,
-      p_genre: attempt.genre || null,
-      p_price: attempt.price,
-      p_audio_url: attempt.audio_url,
-      p_cover_url: attempt.cover_url,
-    })
-
-    if (!rpcResult.error && rpcResult.data?.status === 'ok') {
-      const rpcSong = rpcResult.data.song || null
-      if (rpcSong?.id) {
-        return {
-          id: rpcSong.id,
-          title: rpcSong.title || attempt.title,
-          status: rpcSong.status || 'pending',
-        }
-      }
-    }
-
-    if (rpcResult.error) {
-      console.warn('[UploadSong] create_pending_song_upload RPC unavailable/failure, falling back to direct insert', rpcResult.error)
-    }
-
-    // Fallback path if RPC migration has not been applied yet.
-    const directPayload = {
+    console.log('[UploadSong] current auth user id', user?.id || null)
+    console.log('[UploadSong] artist_profiles.id', songRow.artist_id || null)
+    console.log('[UploadSong] artist_profiles.user_id', user?.id || null)
+    console.log('[UploadSong] full insert payload', JSON.stringify(attempt, null, 2))
+    // Direct insert path avoids RPC signature drift across environments.
+    const directPayloadCoverArt = {
       artist_id: attempt.artist_id,
       title: attempt.title,
       description: attempt.description,
@@ -168,17 +160,48 @@ export default function UploadSongPage() {
       price: attempt.price,
       status: 'pending',
       audio_url: attempt.audio_url,
-      cover_url: attempt.cover_url,
+      cover_art_url: attempt.cover_url,
       created_at: new Date().toISOString(),
     }
 
-    const { data, error } = await supabase
+    let data = null
+    let error = null
+
+    const coverArtInsert = await supabase
       .from('songs')
-      .insert([directPayload])
+      .insert([directPayloadCoverArt])
       .select('id, title, status')
       .single()
 
+    data = coverArtInsert.data
+    error = coverArtInsert.error
+
+    if (error && /column .*cover_art_url.* does not exist/i.test(error.message || '')) {
+      const directPayloadCover = {
+        artist_id: attempt.artist_id,
+        title: attempt.title,
+        description: attempt.description,
+        genre_id: attempt.genre_id,
+        price: attempt.price,
+        status: 'pending',
+        audio_url: attempt.audio_url,
+        cover_url: attempt.cover_url,
+        created_at: new Date().toISOString(),
+      }
+
+      const legacyCoverInsert = await supabase
+        .from('songs')
+        .insert([directPayloadCover])
+        .select('id, title, status')
+        .single()
+
+      data = legacyCoverInsert.data
+      error = legacyCoverInsert.error
+    }
+
     console.log('[UploadSong] songs direct insert result:', { data, error })
+    console.log('[UploadSong] songs insert response data', data)
+    console.log('[UploadSong] songs insert response error', error)
 
     if (error) {
       console.error('[UploadSong] songs insert failed', error)
@@ -240,7 +263,30 @@ export default function UploadSongPage() {
     }
 
     if (!byUserId.data?.id) {
-      throw new Error('No artist profile exists for this account. Please create your artist profile before uploading songs.')
+      const byId = await supabase
+        .from('artist_profiles')
+        .select('id, user_id')
+        .eq('id', authUserId)
+        .maybeSingle()
+
+      console.log('[UploadSong] artist profile legacy lookup by id', {
+        authUserId,
+        data: byId.data,
+        error: byId.error,
+      })
+
+      if (byId.error) {
+        throw new Error(`Could not query artist_profiles by id fallback: ${byId.error.message}`)
+      }
+
+      if (!byId.data?.id) {
+        throw new Error('No artist profile exists for this account. Please create your artist profile before uploading songs.')
+      }
+
+      return {
+        artistProfileId: byId.data.id,
+        lookupMode: 'id',
+      }
     }
 
     return {
@@ -269,15 +315,18 @@ export default function UploadSongPage() {
     setSupabaseError(null)
     setDiagnostics({
       authOk: false,
+      currentAuthUserId: null,
       audioUploaded: false,
       coverUploaded: false,
       dbInsertOk: false,
       artistProfileId: null,
+      artistProfileUserId: null,
       insertedSongId: null,
       insertedStatus: null,
       insertArtistId: null,
       insertPayload: null,
       insertErrorObject: null,
+      insertResponseData: null,
       rlsLikelyBlocked: false,
       songsArtistForeignKey: 'unknown',
     })
@@ -297,7 +346,7 @@ export default function UploadSongPage() {
       console.log('[UploadSong] selected audio file:', audioFile)
       console.log('[UploadSong] selected cover file:', coverFile)
 
-      setDiagnostics(prev => ({ ...prev, authOk: true }))
+      setDiagnostics(prev => ({ ...prev, authOk: true, currentAuthUserId: user.id }))
 
       // Keep artist linkage explicit for song insert diagnostics and FK safety.
       const artistOwner = await resolveArtistOwnerId(user.id)
@@ -305,7 +354,11 @@ export default function UploadSongPage() {
         throw new Error('Could not resolve artist profile id for song insert.')
       }
 
-      setDiagnostics(prev => ({ ...prev, artistProfileId: artistOwner.artistProfileId }))
+      setDiagnostics(prev => ({
+        ...prev,
+        artistProfileId: artistOwner.artistProfileId,
+        artistProfileUserId: user.id,
+      }))
 
       await loadSongsSchemaDiagnostics()
 
@@ -363,34 +416,45 @@ export default function UploadSongPage() {
         insertedSongId: inserted.id,
         insertedStatus: inserted.status,
         insertErrorObject: null,
+        insertResponseData: inserted,
         rlsLikelyBlocked: false,
       }))
 
       if (inserted?.status === 'pending') {
         setProgress('Notifying admins…')
-        await notifyAdminsOfPendingSong(inserted)
+        try {
+          await notifyAdminsOfPendingSong(inserted)
+        } catch (notifyError) {
+          // Song upload should remain successful even if notification RPC fails.
+          console.warn('[UploadSong] admin notification failed after successful insert', notifyError)
+        }
       }
 
+      setError('')
+      setSupabaseError(null)
       setSuccess(true)
-      setSuccessMessage('Song submitted for review.')
+      setSuccessMessage('✅ Song uploaded successfully and is waiting for admin approval.')
       setProgress('Submission complete — redirecting to Artist Dashboard…')
-      redirectTimerRef.current = setTimeout(() => navigate('/artist-dashboard', { replace: true }), 1500)
+      redirectTimerRef.current = setTimeout(() => navigate('/artist-dashboard', { replace: true }), 2000)
       return
     } catch (err) {
       console.error('[UploadSong] Error', err)
       const message = err?.message || 'Something went wrong while uploading the song.'
+      const rawInsertError = err?.rawError || err || null
       setError(message)
       setDiagnostics(prev => ({
         ...prev,
-        insertErrorObject: err?.rawError || err || null,
+        insertErrorObject: hasMeaningfulError(rawInsertError) ? rawInsertError : null,
+        insertResponseData: null,
         rlsLikelyBlocked: err?.rlsLikelyBlocked === true,
       }))
-      setSupabaseError({
+      const normalizedSupabaseError = {
         details: err?.details || null,
         hint: err?.hint || null,
         code: err?.code || null,
         raw: err?.rawError || err || null,
-      })
+      }
+      setSupabaseError(hasMeaningfulError(normalizedSupabaseError) ? normalizedSupabaseError : null)
     } finally {
       setUploading(false)
       if (!success) setProgress('')
@@ -429,15 +493,36 @@ export default function UploadSongPage() {
         )}
 
         {success ? (
-          <div style={{ padding: '2rem', textAlign: 'center' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
-            <h2 style={{ marginBottom: '0.5rem' }}>{successMessage}</h2>
-            <p style={{ marginBottom: '1.5rem', color: 'var(--text)' }}>
-              Your song is now pending review. You will be redirected to your artist dashboard shortly.
+          <div style={{ padding: '1.5rem' }}>
+            <div
+              style={{
+                background: 'rgba(34, 197, 94, 0.14)',
+                border: '1px solid rgba(34, 197, 94, 0.45)',
+                color: '#14532d',
+                borderRadius: 12,
+                padding: '1.25rem',
+                fontSize: '1.125rem',
+                fontWeight: 700,
+                lineHeight: 1.4,
+                textAlign: 'center',
+                marginBottom: '1rem',
+              }}
+            >
+              {successMessage}
+            </div>
+
+            <p style={{ marginBottom: '1.25rem', color: 'var(--text)', textAlign: 'center' }}>
+              Redirecting to your artist dashboard in 2 seconds...
             </p>
-            <button className="btn btn-primary" onClick={() => navigate('/artist-dashboard')}>
-              Go to Artist Dashboard
-            </button>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" type="button" disabled>
+                Submitted for Review
+              </button>
+              <button className="btn btn-outline" type="button" onClick={() => navigate('/artist-dashboard')}>
+                Go to Artist Dashboard
+              </button>
+            </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit}>
@@ -549,10 +634,12 @@ export default function UploadSongPage() {
             <strong style={{ display: 'block', marginBottom: '0.75rem' }}>Upload diagnostics</strong>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
               <div>Auth OK</div><div>{diagnostics.authOk ? '✅' : '⏳'}</div>
+              <div>current auth user id</div><div>{diagnostics.currentAuthUserId || '⏳'}</div>
               <div>Artist profile id</div><div>{diagnostics.artistProfileId || '⏳'}</div>
+              <div>artist_profiles.user_id</div><div>{diagnostics.artistProfileUserId || '⏳'}</div>
               <div>Audio uploaded</div><div>{diagnostics.audioUploaded ? '✅' : '⏳'}</div>
               <div>Cover uploaded</div><div>{coverFile ? (diagnostics.coverUploaded ? '✅' : '⏳') : 'n/a'}</div>
-              <div>DB insert OK</div><div>{diagnostics.dbInsertOk ? '✅' : '⏳'}</div>
+              <div>DB insert OK</div><div>{diagnostics.dbInsertOk ? '✅' : diagnostics.insertErrorObject ? '❌' : '⏳'}</div>
               <div>Inserted song id</div><div>{diagnostics.insertedSongId || '⏳'}</div>
               <div>Inserted status</div><div>{diagnostics.insertedStatus || '⏳'}</div>
               <div>artist_id used for insert</div><div>{diagnostics.insertArtistId || '⏳'}</div>
@@ -562,6 +649,11 @@ export default function UploadSongPage() {
             {diagnostics.insertPayload && (
               <pre style={{ marginTop: '0.75rem', whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
                 Insert payload: {JSON.stringify(diagnostics.insertPayload, null, 2)}
+              </pre>
+            )}
+            {diagnostics.insertResponseData && (
+              <pre style={{ marginTop: '0.75rem', whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>
+                Insert response data: {JSON.stringify(diagnostics.insertResponseData, null, 2)}
               </pre>
             )}
             {diagnostics.insertErrorObject && (
