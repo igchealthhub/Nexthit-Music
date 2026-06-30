@@ -27,6 +27,8 @@ export default function UploadSongPage() {
   const [successMessage, setSuccessMessage] = useState('')
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
+  const [artistProfileMissing, setArtistProfileMissing] = useState(false)
+  const [creatingArtistProfile, setCreatingArtistProfile] = useState(false)
   const [diagnostics, setDiagnostics] = useState({
     authOk: false,
     currentAuthUserId: null,
@@ -246,52 +248,59 @@ export default function UploadSongPage() {
   }
 
   async function resolveArtistOwnerId(authUserId) {
-    const byUserId = await supabase
+    setArtistProfileMissing(false)
+    console.log('Auth User', authUserId)
+
+    const { data: artistProfile, error } = await supabase
       .from('artist_profiles')
       .select('id, user_id')
       .eq('user_id', authUserId)
       .maybeSingle()
 
-    console.log('[UploadSong] artist profile lookup by user_id', {
-      authUserId,
-      data: byUserId.data,
-      error: byUserId.error,
-    })
+    console.log('Artist Profile', artistProfile)
+    console.log('[UploadSong] artist profile lookup by user_id', { authUserId, artistProfile, error })
 
-    if (byUserId.error) {
-      throw new Error(`Could not query artist_profiles by user_id: ${byUserId.error.message}`)
+    if (error) {
+      throw new Error(`Could not query artist_profiles by user_id: ${error.message}`)
     }
 
-    if (!byUserId.data?.id) {
-      const byId = await supabase
-        .from('artist_profiles')
-        .select('id, user_id')
-        .eq('id', authUserId)
-        .maybeSingle()
-
-      console.log('[UploadSong] artist profile legacy lookup by id', {
-        authUserId,
-        data: byId.data,
-        error: byId.error,
-      })
-
-      if (byId.error) {
-        throw new Error(`Could not query artist_profiles by id fallback: ${byId.error.message}`)
-      }
-
-      if (!byId.data?.id) {
-        throw new Error('No artist profile exists for this account. Please create your artist profile before uploading songs.')
-      }
-
-      return {
-        artistProfileId: byId.data.id,
-        lookupMode: 'id',
-      }
+    if (!artistProfile?.id) {
+      setArtistProfileMissing(true)
+      throw new Error('No artist profile exists for this account. Please create your artist profile before uploading songs.')
     }
 
     return {
-      artistProfileId: byUserId.data.id,
+      artistProfileId: artistProfile.id,
       lookupMode: 'user_id',
+    }
+  }
+
+  async function createArtistProfileAndReload() {
+    if (!user?.id || creatingArtistProfile) return
+
+    setCreatingArtistProfile(true)
+    setError('')
+    setSupabaseError(null)
+
+    try {
+      const withUserId = await supabase
+        .from('artist_profiles')
+        .upsert({ id: user.id, user_id: user.id }, { onConflict: 'id' })
+
+      if (withUserId.error && /column .*user_id.* does not exist/i.test(withUserId.error.message || '')) {
+        const legacy = await supabase
+          .from('artist_profiles')
+          .upsert({ id: user.id }, { onConflict: 'id' })
+        if (legacy.error) throw legacy.error
+      } else if (withUserId.error) {
+        throw withUserId.error
+      }
+
+      window.location.reload()
+    } catch (err) {
+      setError(`Could not create artist profile: ${err.message || 'unknown error'}`)
+    } finally {
+      setCreatingArtistProfile(false)
     }
   }
 
@@ -477,6 +486,18 @@ export default function UploadSongPage() {
         {error && (
           <div className="alert alert-error">
             <div>{error}</div>
+            {artistProfileMissing && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={createArtistProfileAndReload}
+                  disabled={creatingArtistProfile}
+                >
+                  {creatingArtistProfile ? 'Creating…' : 'Create Artist Profile'}
+                </button>
+              </div>
+            )}
             {supabaseError && (
               <div style={{ marginTop: '0.75rem', fontFamily: 'monospace', fontSize: '0.9rem' }}>
                 {supabaseError.details && <div><strong>Details:</strong> {supabaseError.details}</div>}

@@ -15,6 +15,7 @@ test.describe('Song system', () => {
     await login(page, 'artist')
     await page.goto('/upload/song')
     await expect(page.getByRole('heading', { name: /upload song/i })).toBeVisible()
+    await expect(page.locator('body')).not.toContainText(/no artist profile exists for this account/i)
 
     await page.getByRole('button', { name: /submit for review/i }).click()
     await expect(page.locator('body')).toContainText(/song title is required|please select an audio file/i)
