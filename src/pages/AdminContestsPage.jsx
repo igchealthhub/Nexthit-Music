@@ -6,14 +6,37 @@ import { supabase } from '../lib/supabase'
 const EMPTY_FORM = {
   title: '',
   description: '',
-  prize: '',
-  entry_fee: '0',
+  prize_amount: '0',
   start_date: '',
   end_date: '',
+  cover_url: '',
   status: 'draft',
 }
 
-const STATUS_OPTIONS = ['draft', 'active', 'closed', 'archived']
+const STATUS_OPTIONS = ['draft', 'active', 'completed']
+
+function normalizeContestStatus(value) {
+  const normalized = String(value || 'draft').toLowerCase()
+  if (normalized === 'closed' || normalized === 'archived') return 'completed'
+  if (normalized === 'draft' || normalized === 'active' || normalized === 'completed') return normalized
+  return 'draft'
+}
+
+function parsePrizeAmount(value) {
+  if (value === null || value === undefined || value === '') return 0
+  const numeric = Number(String(value).replace(/[^0-9.-]/g, ''))
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+function normalizeContestRow(contest) {
+  if (!contest) return contest
+  return {
+    ...contest,
+    prize_amount: contest.prize_amount ?? parsePrizeAmount(contest.prize),
+    cover_url: contest.cover_url || null,
+    status: normalizeContestStatus(contest.status),
+  }
+}
 
 function toDatetimeLocal(value) {
   if (!value) return ''
@@ -36,6 +59,7 @@ export default function AdminContestsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [schemaHint, setSchemaHint] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
@@ -46,21 +70,26 @@ export default function AdminContestsPage() {
   async function loadContests() {
     setLoading(true)
     setError('')
+    setSchemaHint('')
 
-    const { data, error: fetchError } = await supabase
-      .from('contests')
-      .select('id, title, description, prize, entry_fee, start_date, end_date, status, created_by, created_at, updated_at')
-      .order('created_at', { ascending: false })
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('contests')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-    if (fetchError) {
-      setError(fetchError.message)
+      if (fetchError) {
+        throw fetchError
+      }
+
+      setContests((data || []).map(normalizeContestRow))
+    } catch (fetchError) {
+      console.error('ADMIN CONTEST LOAD ERROR', fetchError)
+      setError(`Could not load contests: ${fetchError.message}`)
       setContests([])
+    } finally {
       setLoading(false)
-      return
     }
-
-    setContests(data || [])
-    setLoading(false)
   }
 
   async function isAdminFromProfiles() {
@@ -92,29 +121,73 @@ export default function AdminContestsPage() {
     setForm({
       title: contest.title || '',
       description: contest.description || '',
-      prize: contest.prize || '',
-      entry_fee: String(contest.entry_fee ?? 0),
+      prize_amount: String(contest.prize_amount ?? 0),
       start_date: toDatetimeLocal(contest.start_date),
       end_date: toDatetimeLocal(contest.end_date),
-      status: contest.status || 'draft',
+      cover_url: contest.cover_url || '',
+      status: normalizeContestStatus(contest.status),
     })
     setError('')
     setSuccess('')
+    setSchemaHint('')
+  }
+
+  async function saveContestWithFallback(payload, isEditing) {
+    const updatePayload = { ...payload }
+    delete updatePayload.created_by
+
+    const primaryRequest = isEditing
+      ? supabase.from('contests').update(updatePayload).eq('id', editingId).select('*').single()
+      : supabase.from('contests').insert(payload).select('*').single()
+
+    let result = await primaryRequest
+    if (!result.error) return result
+
+    const message = result.error.message || ''
+    const needsLegacyFallback =
+      result.error.code === 'PGRST204' ||
+      /prize_amount|cover_url|completed|status/i.test(message)
+
+    if (!needsLegacyFallback) {
+      return result
+    }
+
+    const legacyStatus = payload.status === 'completed' ? 'closed' : payload.status
+    const legacyPayload = {
+      title: payload.title,
+      description: payload.description,
+      prize: payload.prize_amount > 0 ? String(payload.prize_amount) : null,
+      start_date: payload.start_date,
+      end_date: payload.end_date,
+      status: legacyStatus,
+      created_by: payload.created_by,
+    }
+    const legacyUpdatePayload = { ...legacyPayload }
+    delete legacyUpdatePayload.created_by
+
+    setSchemaHint('Contest manager is using legacy column compatibility. Run the Supabase migration to add prize_amount, cover_url, and completed status support.')
+
+    result = isEditing
+      ? await supabase.from('contests').update(legacyUpdatePayload).eq('id', editingId).select('*').single()
+      : await supabase.from('contests').insert(legacyPayload).select('*').single()
+
+    return result
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setSuccess('')
+    setSchemaHint('')
 
     if (!form.title.trim()) {
       setError('Contest title is required.')
       return
     }
 
-    const entryFeeValue = Number(form.entry_fee)
-    if (Number.isNaN(entryFeeValue) || entryFeeValue < 0) {
-      setError('Entry fee must be a valid non-negative number.')
+    const prizeAmount = Number(form.prize_amount)
+    if (Number.isNaN(prizeAmount) || prizeAmount < 0) {
+      setError('Prize amount must be a valid non-negative number.')
       return
     }
 
@@ -126,61 +199,66 @@ export default function AdminContestsPage() {
 
     setSaving(true)
 
-    const payload = {
-      title: form.title.trim(),
-      description: form.description.trim() || null,
-      prize: form.prize.trim() || null,
-      entry_fee: entryFeeValue,
-      start_date: form.start_date || null,
-      end_date: form.end_date || null,
-      status: form.status,
-      created_by: user?.id || null,
-    }
+    try {
+      const payload = {
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        prize_amount: prizeAmount,
+        start_date: form.start_date || null,
+        end_date: form.end_date || null,
+        cover_url: form.cover_url.trim() || null,
+        status: normalizeContestStatus(form.status),
+        created_by: user?.id || null,
+      }
 
-    console.log('CREATE CONTEST PAYLOAD', payload)
+      console.log('CREATE CONTEST PAYLOAD', payload)
 
-    const updatePayload = { ...payload }
-    delete updatePayload.created_by
+      const { data: savedContest, error: saveError } = await saveContestWithFallback(payload, Boolean(editingId))
 
-    const request = editingId
-      ? supabase.from('contests').update(updatePayload).eq('id', editingId).select('*').single()
-      : supabase.from('contests').insert(payload).select('*').single()
+      if (saveError) {
+        console.error('CREATE CONTEST ERROR', saveError)
+        setError(`Could not create contest: ${saveError.message}`)
+        return
+      }
 
-    const { data: savedContest, error: saveError } = await request
+      const normalizedSavedContest = normalizeContestRow(savedContest)
+      const createdContestId = normalizedSavedContest?.id
+      if (!editingId && !createdContestId) {
+        setError('Contest was saved but no contest id was returned.')
+        return
+      }
 
-    if (saveError) {
+      setForm(EMPTY_FORM)
+      setEditingId(null)
+      setSuccess(editingId ? 'Contest updated successfully.' : 'Contest created successfully.')
+      await loadContests()
+
+      if (!editingId && createdContestId) {
+        navigate(`/contests/${createdContestId}`, {
+          state: { message: 'Contest created successfully.' },
+        })
+      }
+    } catch (saveError) {
       console.error('CREATE CONTEST ERROR', saveError)
-      setError(`Could not create contest: ${saveError.message}`)
+      setError(`Could not create contest: ${saveError.message || 'Unknown error'}`)
+    } finally {
       setSaving(false)
-      return
-    }
-
-    const createdContestId = savedContest?.id
-    if (!editingId && !createdContestId) {
-      setError('Contest was saved but no contest id was returned.')
-      setSaving(false)
-      return
-    }
-
-    setForm(EMPTY_FORM)
-    setEditingId(null)
-    setSaving(false)
-    setSuccess('Contest created successfully.')
-    await loadContests()
-
-    if (!editingId && createdContestId) {
-      navigate(`/contests/${createdContestId}`, {
-        state: { message: 'Contest created successfully.' },
-      })
     }
   }
 
   async function updateStatus(id, status) {
     setError('')
-    const { error: updateError } = await supabase.from('contests').update({ status }).eq('id', id)
-    if (updateError) {
-      setError(updateError.message)
-      return
+    setSchemaHint('')
+    const normalizedStatus = normalizeContestStatus(status)
+    const primary = await supabase.from('contests').update({ status: normalizedStatus }).eq('id', id)
+    if (primary.error) {
+      const fallbackStatus = normalizedStatus === 'completed' ? 'closed' : normalizedStatus
+      const fallback = await supabase.from('contests').update({ status: fallbackStatus }).eq('id', id)
+      if (fallback.error) {
+        setError(fallback.error.message)
+        return
+      }
+      setSchemaHint('Contest status was saved using legacy status compatibility. Run the Supabase migration to add completed status support.')
     }
     await loadContests()
   }
@@ -199,6 +277,7 @@ export default function AdminContestsPage() {
 
       {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
       {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
+      {schemaHint && <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>{schemaHint}</div>}
 
       <div className="grid-2">
         <div className="card">
@@ -219,12 +298,8 @@ export default function AdminContestsPage() {
               <textarea className="input" value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} />
             </div>
             <div className="form-group">
-              <label>Prize</label>
-              <input className="input" value={form.prize} onChange={e => setForm(prev => ({ ...prev, prize: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label>Entry Fee</label>
-              <input className="input" type="number" min="0" step="0.01" value={form.entry_fee} onChange={e => setForm(prev => ({ ...prev, entry_fee: e.target.value }))} />
+              <label>Prize Amount</label>
+              <input className="input" type="number" min="0" step="0.01" value={form.prize_amount} onChange={e => setForm(prev => ({ ...prev, prize_amount: e.target.value }))} />
             </div>
             <div className="grid-2" style={{ gap: '0.75rem' }}>
               <div className="form-group">
@@ -235,6 +310,10 @@ export default function AdminContestsPage() {
                 <label>End Date</label>
                 <input className="input" type="datetime-local" value={form.end_date} onChange={e => setForm(prev => ({ ...prev, end_date: e.target.value }))} />
               </div>
+            </div>
+            <div className="form-group">
+              <label>Cover Image URL</label>
+              <input className="input" type="url" placeholder="https://..." value={form.cover_url} onChange={e => setForm(prev => ({ ...prev, cover_url: e.target.value }))} />
             </div>
             <div className="form-group">
               <label>Status</label>
@@ -269,18 +348,22 @@ export default function AdminContestsPage() {
               {contests.map(contest => (
                 <div key={contest.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    <div>
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                      <div style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--surface-2)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1.25rem' }}>
+                        {contest.cover_url ? <img src={contest.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🏆'}
+                      </div>
+                      <div>
                       <div style={{ fontWeight: 700, color: 'var(--text-h)' }}>{contest.title}</div>
                       <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>{contest.description || 'No description'}</div>
+                      </div>
                     </div>
-                    <span className={`badge ${contest.status === 'active' ? 'badge-active' : contest.status === 'closed' ? 'badge-fan' : contest.status === 'archived' ? 'badge-admin' : 'badge-pending'}`}>
+                    <span className={`badge ${contest.status === 'active' ? 'badge-active' : contest.status === 'completed' ? 'badge-fan' : 'badge-pending'}`}>
                       {contest.status}
                     </span>
                   </div>
 
                   <div style={{ display: 'grid', gap: '0.25rem', marginTop: '0.75rem', fontSize: '0.875rem', color: 'var(--text)' }}>
-                    <div><strong>Prize:</strong> {contest.prize || '—'}</div>
-                    <div><strong>Entry Fee:</strong> {formatMoney(contest.entry_fee)}</div>
+                    <div><strong>Prize Amount:</strong> {formatMoney(contest.prize_amount)}</div>
                     <div><strong>Start:</strong> {contest.start_date ? new Date(contest.start_date).toLocaleString() : '—'}</div>
                     <div><strong>End:</strong> {contest.end_date ? new Date(contest.end_date).toLocaleString() : '—'}</div>
                   </div>

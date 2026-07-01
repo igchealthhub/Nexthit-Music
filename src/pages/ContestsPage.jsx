@@ -8,6 +8,24 @@ const STATUS_COLORS = {
   active: 'badge-active',
   voting: 'badge-pending',
   closed: 'badge-fan',
+  completed: 'badge-fan',
+}
+
+function parsePrizeAmount(contest) {
+  const raw = contest?.prize_amount ?? contest?.entry_fee ?? contest?.prize ?? 0
+  const numeric = Number(String(raw).replace(/[^0-9.-]/g, ''))
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+function normalizeContest(contest) {
+  if (!contest) return contest
+  const status = String(contest.status || 'draft').toLowerCase()
+  return {
+    ...contest,
+    status: status === 'closed' || status === 'archived' ? 'completed' : status,
+    prize_amount: parsePrizeAmount(contest),
+    cover_url: contest.cover_url || null,
+  }
 }
 
 export default function ContestsPage() {
@@ -39,7 +57,7 @@ export default function ContestsPage() {
 
     let query = supabase
       .from('contests')
-      .select('id, title, description, prize, entry_fee, start_date, end_date, status, contest_entries(id)')
+      .select('*, contest_entries(id)')
       .order('created_at', { ascending: false })
 
     if (!isAdmin) {
@@ -55,7 +73,7 @@ export default function ContestsPage() {
       return
     }
 
-    setContests(data || [])
+    setContests((data || []).map(normalizeContest))
     setLoading(false)
   }
 
@@ -115,12 +133,16 @@ export default function ContestsPage() {
                   </p>
                 )}
                 <div style={{ display: 'grid', gap: '0.35rem', marginBottom: '1rem', fontSize: '0.875rem', color: 'var(--text)' }}>
-                  <div><strong>Prize:</strong> {c.prize || '—'}</div>
-                  <div><strong>Entry Fee:</strong> {formatMoney(c.entry_fee)}</div>
+                  <div><strong>Prize Amount:</strong> {formatMoney(c.prize_amount)}</div>
                   <div><strong>Start:</strong> {formatDate(c.start_date)}</div>
                   <div><strong>End:</strong> {formatDate(c.end_date)}</div>
                   <div><strong>Entries:</strong> {entryCount}</div>
                 </div>
+                {c.cover_url && (
+                  <div style={{ width: '100%', height: 160, borderRadius: 10, overflow: 'hidden', background: 'var(--surface-2)', marginBottom: '1rem' }}>
+                    <img src={c.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                )}
                 <Link to={`/contests/${c.id}`} className="btn btn-primary btn-sm">
                   🗳️ Enter Contest
                 </Link>
