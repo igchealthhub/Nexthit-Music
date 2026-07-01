@@ -13,6 +13,10 @@ export default async function handler(req, res) {
   if (!signature) return sendJson(res, 400, { error: 'Missing Stripe signature.' })
 
   try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return sendJson(res, 500, { error: 'Missing STRIPE_SECRET_KEY.' })
+    }
+
     const raw = await readRawBody(req)
     const secret = process.env.STRIPE_WEBHOOK_SECRET
     if (!secret) return sendJson(res, 500, { error: 'Missing STRIPE_WEBHOOK_SECRET.' })
@@ -23,9 +27,17 @@ export default async function handler(req, res) {
       const session = event.data.object
       const metadata = session.metadata || {}
 
+      if (session.payment_status !== 'paid') {
+        return sendJson(res, 200, { received: true, ignored: 'payment_not_paid' })
+      }
+
+      if (!metadata.buyer_id || !metadata.song_id) {
+        return sendJson(res, 200, { received: true, ignored: 'missing_metadata' })
+      }
+
       const payload = {
-        buyer_id: metadata.buyer_id || null,
-        song_id: metadata.song_id || null,
+        buyer_id: metadata.buyer_id,
+        song_id: metadata.song_id,
         artist_id: metadata.artist_id || null,
         amount: Number(metadata.amount || 0) / 100,
         platform_fee: Number(metadata.platform_fee || 0) / 100,
@@ -37,9 +49,13 @@ export default async function handler(req, res) {
         status: 'completed',
       }
 
-      await supabaseAdmin
+      const upsertResult = await supabaseAdmin
         .from('purchases')
-        .upsert(payload, { onConflict: 'stripe_checkout_session_id' })
+        .upsert(payload, { onConflict: 'buyer_id,song_id' })
+
+      if (upsertResult.error) {
+        throw upsertResult.error
+      }
     }
 
     return sendJson(res, 200, { received: true })

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 
 export default function MessagesPage() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
   const [allMessages, setAllMessages] = useState([])
   const [profiles, setProfiles] = useState({})
   const [conversations, setConversations] = useState([])
@@ -16,45 +18,146 @@ export default function MessagesPage() {
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
+  const [loadingError, setLoadingError] = useState('')
+  const [sendError, setSendError] = useState('')
+  const [searchError, setSearchError] = useState('')
+  const [subscriptionStatus, setSubscriptionStatus] = useState('disconnected')
   const threadRef = useRef(null)
 
-  useEffect(() => { load() }, [user?.id])
+  useEffect(() => {
+    if (!user?.id) return
+    load()
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    console.log('MESSAGES REALTIME INIT', { currentUserId: user.id })
+    setSubscriptionStatus('connecting')
+
+    const onRealtimeEvent = payload => {
+      console.log('MESSAGES REALTIME EVENT', { currentUserId: user.id, payload })
+      load()
+    }
+
+    const incomingChannel = supabase
+      .channel(`messages-incoming-${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `recipient_id=eq.${user.id}`,
+      }, onRealtimeEvent)
+      .subscribe(status => {
+        console.log('MESSAGES REALTIME STATUS', { channel: 'incoming', status, currentUserId: user.id })
+        setSubscriptionStatus(status)
+      })
+
+    const outgoingChannel = supabase
+      .channel(`messages-outgoing-${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `sender_id=eq.${user.id}`,
+      }, onRealtimeEvent)
+      .subscribe(status => {
+        console.log('MESSAGES REALTIME STATUS', { channel: 'outgoing', status, currentUserId: user.id })
+      })
+
+    return () => {
+      supabase.removeChannel(incomingChannel)
+      supabase.removeChannel(outgoingChannel)
+      setSubscriptionStatus('disconnected')
+    }
+  }, [user?.id])
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
   }, [thread])
 
+  function isUnreadMessage(message) {
+    if (typeof message.read === 'boolean') return message.read === false
+    return !message.read_at
+  }
+
   async function load() {
+    if (!user?.id) return
+
+    setLoadingError('')
     setLoading(true)
-    const { data: msgs } = await supabase
-      .from('messages')
-      .select('*')
-      .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`)
-      .order('created_at', { ascending: true })
-      .limit(500)
 
-    const msgList = msgs || []
-    setAllMessages(msgList)
+    try {
+      console.log('MESSAGES LOAD START', { currentUserId: user.id })
+      const { data: msgs, error: messagesError } = await supabase
+        .from('messages')
+        .select('*')
+        .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`)
+        .order('created_at', { ascending: true })
+        .limit(500)
 
-    // Fetch profiles for all other users
-    const otherIds = [...new Set(
-      msgList.flatMap(m => [m.sender_id, m.recipient_id]).filter(id => id !== user.id)
-    )]
+      console.log('MESSAGES QUERY RESULT', { currentUserId: user.id, resultCount: msgs?.length || 0, error: messagesError || null })
 
-    if (otherIds.length) {
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('id, display_name, avatar_url, verified')
-        .in('id', otherIds)
-      const pMap = {}
-      profileData?.forEach(p => { pMap[p.id] = p })
+      if (messagesError) throw messagesError
+
+      const msgList = msgs || []
+      setAllMessages(msgList)
+
+      const otherIds = [...new Set(
+        msgList.flatMap(m => [m.sender_id, m.recipient_id]).filter(id => id !== user.id)
+      )]
+
+      let pMap = {}
+      if (otherIds.length) {
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, display_name, avatar_url, verified, role')
+          .in('id', otherIds)
+
+        if (profileError) {
+          console.warn('MESSAGES PROFILE LOOKUP ERROR', { currentUserId: user.id, error: profileError })
+        }
+
+        profileData?.forEach(p => { pMap[p.id] = p })
+      }
+
+      const targetFromQuery = searchParams.get('user')
+      if (targetFromQuery && !pMap[targetFromQuery]) {
+        const { data: targetProfile } = await supabase
+          .from('profiles')
+          .select('id, display_name, avatar_url, verified, role')
+          .eq('id', targetFromQuery)
+          .maybeSingle()
+        if (targetProfile) {
+          pMap[targetFromQuery] = targetProfile
+        }
+      }
+
       setProfiles(pMap)
-      buildConversations(msgList, pMap)
-    } else {
-      buildConversations(msgList, {})
-    }
+      const sortedConversations = buildConversations(msgList, pMap)
 
-    setLoading(false)
+      const activeUserId = selectedUserId || targetFromQuery || null
+      if (activeUserId) {
+        console.log('MESSAGES SELECTED CONVERSATION', { currentUserId: user.id, selectedConversation: activeUserId })
+        setSelectedUserId(activeUserId)
+        const activeThread = msgList.filter(m =>
+          (m.sender_id === user.id && m.recipient_id === activeUserId) ||
+          (m.sender_id === activeUserId && m.recipient_id === user.id)
+        )
+        setThread(activeThread)
+
+        const hasUnread = activeThread.some(m => m.sender_id === activeUserId && m.recipient_id === user.id && isUnreadMessage(m))
+        if (hasUnread) {
+          await markConvRead(activeUserId)
+        }
+      } else if (!sortedConversations.length) {
+        setThread([])
+      }
+    } catch (err) {
+      setLoadingError(err?.message || 'Unable to load messages right now.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   function buildConversations(msgs, profileMap) {
@@ -65,7 +168,7 @@ export default function MessagesPage() {
         convMap[otherId] = { userId: otherId, profile: profileMap[otherId], messages: [], unread: 0 }
       }
       convMap[otherId].messages.push(m)
-      if (!m.read && m.recipient_id === user.id) convMap[otherId].unread++
+      if (isUnreadMessage(m) && m.recipient_id === user.id) convMap[otherId].unread++
     })
     const sorted = Object.values(convMap).sort((a, b) => {
       const aLast = a.messages[a.messages.length - 1]?.created_at || ''
@@ -73,10 +176,13 @@ export default function MessagesPage() {
       return bLast.localeCompare(aLast)
     })
     setConversations(sorted)
+    return sorted
   }
 
   function selectConversation(conv) {
+    setSendError('')
     setSelectedUserId(conv.userId)
+    console.log('MESSAGES SELECTED CONVERSATION', { currentUserId: user?.id || null, selectedConversation: conv.userId })
     const msgs = allMessages
       .filter(m =>
         (m.sender_id === user.id && m.recipient_id === conv.userId) ||
@@ -87,35 +193,83 @@ export default function MessagesPage() {
   }
 
   async function markConvRead(otherId) {
-    await supabase.from('messages').update({ read: true })
+    const readAt = new Date().toISOString()
+    let updateRes = await supabase
+      .from('messages')
+      .update({ read: true, read_at: readAt })
       .eq('recipient_id', user.id)
       .eq('sender_id', otherId)
-      .eq('read', false)
+      .or('read.eq.false,read_at.is.null')
+
+    if (updateRes.error && /column .*read_at.* does not exist/i.test(updateRes.error.message || '')) {
+      updateRes = await supabase
+        .from('messages')
+        .update({ read: true })
+        .eq('recipient_id', user.id)
+        .eq('sender_id', otherId)
+        .eq('read', false)
+    }
+
+    if (updateRes.error) {
+      console.warn('MESSAGES MARK READ ERROR', { currentUserId: user.id, selectedConversation: otherId, error: updateRes.error })
+      return
+    }
+
     setConversations(prev => prev.map(c => c.userId === otherId ? { ...c, unread: 0 } : c))
   }
 
   async function sendMessage(e) {
     e.preventDefault()
     if (!newMsg.trim() || !selectedUserId || sending) return
+    setSendError('')
     setSending(true)
-    const { data, error } = await supabase.from('messages').insert({
+
+    let insertRes = await supabase.from('messages').insert({
       sender_id: user.id,
       recipient_id: selectedUserId,
       body: newMsg.trim(),
+      read: false,
+      read_at: null,
     }).select('*').single()
-    if (!error && data) {
-      const updated = [...allMessages, data]
-      setAllMessages(updated)
-      setThread(prev => [...prev, data])
-      const conv = conversations.find(c => c.userId === selectedUserId)
-      if (conv) {
-        buildConversations(updated, profiles)
-      } else {
-        // New conversation
-        await load()
-      }
-      setNewMsg('')
+
+    if (insertRes.error && /column .*read_at.* does not exist/i.test(insertRes.error.message || '')) {
+      insertRes = await supabase.from('messages').insert({
+        sender_id: user.id,
+        recipient_id: selectedUserId,
+        body: newMsg.trim(),
+        read: false,
+      }).select('*').single()
     }
+
+    console.log('MESSAGES INSERT RESULT', {
+      currentUserId: user.id,
+      selectedConversation: selectedUserId,
+      data: insertRes.data || null,
+      error: insertRes.error || null,
+    })
+
+    if (!insertRes.error && insertRes.data) {
+      const updated = [...allMessages, insertRes.data]
+      setAllMessages(updated)
+      setThread(prev => [...prev, insertRes.data])
+      buildConversations(updated, profiles)
+      setNewMsg('')
+
+      const notificationRes = await supabase.from('notifications').insert({
+        user_id: selectedUserId,
+        type: 'message',
+        title: 'New message',
+        body: newMsg.trim().slice(0, 140),
+        link: '/messages',
+        read: false,
+      })
+      if (notificationRes.error) {
+        console.warn('MESSAGE NOTIFICATION INSERT ERROR', { currentUserId: user.id, error: notificationRes.error })
+      }
+    } else {
+      setSendError(insertRes.error?.message || 'Message failed to send. Please try again.')
+    }
+
     setSending(false)
   }
 
@@ -131,20 +285,31 @@ export default function MessagesPage() {
     }
     setShowSearch(false)
     setSearchQuery('')
+    setSearchError('')
     setSearchResults([])
   }
 
   async function handleSearch(q) {
     setSearchQuery(q)
+    setSearchError('')
     if (!q.trim()) { setSearchResults([]); return }
     setSearching(true)
-    const { data } = await supabase.from('profiles')
-      .select('id, display_name, avatar_url, verified, role')
-      .ilike('display_name', `%${q}%`)
-      .neq('id', user.id)
-      .limit(10)
-    setSearchResults(data || [])
-    setSearching(false)
+
+    try {
+      const { data, error } = await supabase.from('profiles')
+        .select('id, display_name, avatar_url, verified, role')
+        .ilike('display_name', `%${q}%`)
+        .neq('id', user.id)
+        .limit(10)
+
+      if (error) throw error
+      setSearchResults(data || [])
+    } catch (err) {
+      setSearchError(err?.message || 'Search failed. Please try again.')
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
   }
 
   function timeAgo(ts) {
@@ -163,7 +328,21 @@ export default function MessagesPage() {
     <div className="page" style={{ maxWidth: 900, padding: '1.5rem' }}>
       <div className="page-header" style={{ marginBottom: '1.5rem' }}>
         <h1>💬 Messages</h1>
+        <p style={{ marginTop: '0.375rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+          Realtime status: {subscriptionStatus}
+        </p>
       </div>
+
+      {loadingError && (
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          Could not load messages: {loadingError}
+        </div>
+      )}
+      {sendError && (
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+          {sendError}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.25rem', height: 600, maxHeight: '70vh' }}>
 
@@ -191,6 +370,7 @@ export default function MessagesPage() {
                 autoFocus
               />
               {searching && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>Searching…</div>}
+              {searchError && <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>{searchError}</div>}
               {searchResults.map(p => (
                 <div
                   key={p.id}

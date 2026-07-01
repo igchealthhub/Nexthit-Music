@@ -4,6 +4,10 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' })
 
   try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return sendJson(res, 500, { error: 'Missing STRIPE_SECRET_KEY.' })
+    }
+
     const user = await requireUser(req, res)
     if (!user) return
 
@@ -20,6 +24,24 @@ export default async function handler(req, res) {
 
     if (songError || !song) return sendJson(res, 404, { error: songError?.message || 'Song not found.' })
     if ((song.status || '').toLowerCase() !== 'approved') return sendJson(res, 400, { error: 'Song is not available for purchase.' })
+
+    const { data: existingPurchase, error: purchaseLookupError } = await supabaseAdmin
+      .from('purchases')
+      .select('id, buyer_id, song_id, status')
+      .eq('buyer_id', user.id)
+      .eq('song_id', song.id)
+      .maybeSingle()
+
+    if (purchaseLookupError) {
+      return sendJson(res, 500, { error: purchaseLookupError.message })
+    }
+
+    if (existingPurchase) {
+      return sendJson(res, 200, {
+        alreadyPurchased: true,
+        message: 'Song already purchased.',
+      })
+    }
 
     const amount = Math.max(0, Math.round(Number(song.price || 0) * 100))
     if (amount <= 0) return sendJson(res, 400, { error: 'This song is free and does not require checkout.' })
@@ -54,6 +76,7 @@ export default async function handler(req, res) {
         affiliate_id: '',
         affiliate_amount: '0',
       },
+      customer_email: user.email || undefined,
     })
 
     return sendJson(res, 200, {

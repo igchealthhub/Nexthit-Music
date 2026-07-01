@@ -22,18 +22,42 @@ export default function Navbar() {
     let cancelled = false
 
     async function loadUnreadCounts() {
-      const [{ count: notificationsCount, error: notifError }, { count: messageCount, error: messageError }] = await Promise.all([
+      const [{ count: notificationsCount, error: notifError }] = await Promise.all([
         supabase
           .from('notifications')
           .select('id', { count: 'exact', head: true })
           .eq('user_id', user.id)
           .eq('read', false),
-        supabase
+      ])
+
+      let messageCount = 0
+      let messageError = null
+
+      const unreadByReadAt = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('recipient_id', user.id)
+        .is('read_at', null)
+
+      if (unreadByReadAt.error && /column .*read_at.* does not exist/i.test(unreadByReadAt.error.message || '')) {
+        const unreadByReadFlag = await supabase
           .from('messages')
           .select('id', { count: 'exact', head: true })
-          .eq('to_user', user.id)
-          .eq('read', false),
-      ])
+          .eq('recipient_id', user.id)
+          .eq('read', false)
+        messageCount = unreadByReadFlag.count || 0
+        messageError = unreadByReadFlag.error
+      } else {
+        messageCount = unreadByReadAt.count || 0
+        messageError = unreadByReadAt.error
+      }
+
+      if (messageError) {
+        console.warn('NAVBAR UNREAD MESSAGES ERROR', { currentUserId: user.id, error: messageError })
+      }
+      if (notifError) {
+        console.warn('NAVBAR UNREAD NOTIFICATIONS ERROR', { currentUserId: user.id, error: notifError })
+      }
 
       if (cancelled) return
       setUnreadCount(notifError ? 0 : (notificationsCount || 0))

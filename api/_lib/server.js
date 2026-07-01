@@ -6,23 +6,27 @@ const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABA
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!supabaseUrl) throw new Error('Missing SUPABASE_URL (or VITE_SUPABASE_URL)')
-if (!supabaseAnonKey) throw new Error('Missing SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY)')
 if (!supabaseServiceRoleKey) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
 
 export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
 
-export const supabaseAnon = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-})
+export const supabaseAnon = supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
   apiVersion: '2025-05-28.basil',
 })
 
 export function siteUrl(req) {
-  return process.env.VITE_SITE_URL || `https://${req.headers.host}`
+  if (process.env.SITE_URL) return process.env.SITE_URL
+  if (process.env.VITE_SITE_URL) return process.env.VITE_SITE_URL
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return `https://${req.headers.host}`
 }
 
 export function sendJson(res, statusCode, payload) {
@@ -44,7 +48,7 @@ export async function requireUser(req, res) {
     return null
   }
 
-  const { data, error } = await supabaseAnon.auth.getUser(token)
+  const { data, error } = await supabaseAdmin.auth.getUser(token)
   if (error || !data?.user) {
     sendJson(res, 401, { error: error?.message || 'Invalid auth token.' })
     return null

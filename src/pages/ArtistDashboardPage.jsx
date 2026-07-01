@@ -252,6 +252,7 @@ export default function ArtistDashboardPage() {
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <Link to="/upload/song" className="btn btn-primary btn-sm">+ Upload Song</Link>
           <Link to="/upload/video" className="btn btn-outline btn-sm">+ Upload Video</Link>
+          <Link to="/messages" className="btn btn-outline btn-sm">💬 Messages</Link>
           <Link to="/contests" className="btn btn-outline btn-sm">🏆 Contests</Link>
         </div>
       </div>

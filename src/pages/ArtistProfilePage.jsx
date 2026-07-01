@@ -110,13 +110,24 @@ export default function ArtistProfilePage() {
               </div>
 
               {!isOwnProfile && (
-                <button
-                  className={`btn ${isFollowing ? 'btn-outline' : 'btn-primary'}`}
-                  onClick={toggleFollow}
-                  disabled={toggling}
-                >
-                  {toggling ? '…' : isFollowing ? 'Following ✓' : '+ Follow'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    className={`btn ${isFollowing ? 'btn-outline' : 'btn-primary'}`}
+                    onClick={toggleFollow}
+                    disabled={toggling}
+                  >
+                    {toggling ? '…' : isFollowing ? 'Following ✓' : '+ Follow'}
+                  </button>
+                  {user ? (
+                    <Link to={`/messages?user=${id}`} className="btn btn-outline">
+                      💬 Message Artist
+                    </Link>
+                  ) : (
+                    <Link to="/login" className="btn btn-outline">
+                      💬 Message Artist
+                    </Link>
+                  )}
+                </div>
               )}
               {isOwnProfile && (
                 <Link to="/profile" className="btn btn-outline btn-sm">Edit Profile</Link>

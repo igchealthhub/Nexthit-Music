@@ -265,10 +265,18 @@ export default function SongsPage() {
         body: JSON.stringify({ songId: purchaseModal.id }),
       })
 
+      if (result?.alreadyPurchased) {
+        setUserPurchases(prev => new Set([...prev, purchaseModal.id]))
+        setCheckoutMessage('You already purchased this song. Full access is unlocked.')
+        setPurchaseModal(null)
+        setPurchasing(false)
+        return
+      }
+
       if (!result?.url) throw new Error('Stripe checkout URL was not returned.')
       window.location.assign(result.url)
     } catch (error) {
-      alert(`Purchase failed: ${error.message}`)
+      setCheckoutError(`Checkout failed: ${error.message}`)
       setPurchasing(false)
       return
     }
@@ -532,6 +540,20 @@ function SongCard({ song, user, liked, likeCount, avgRating, ratingCount, userRa
           <button className="action-btn" onClick={onComment}>
             💬 {commentCount > 0 && commentCount}
           </button>
+
+          {artistProfile && (
+            user ? (
+              user.id !== artistProfile.id && (
+                <Link to={`/messages?user=${artistProfile.id}`} className="btn btn-outline btn-sm" style={{ textDecoration: 'none' }}>
+                  Message Artist
+                </Link>
+              )
+            ) : (
+              <Link to="/login" className="btn btn-outline btn-sm" style={{ textDecoration: 'none' }}>
+                Message Artist
+              </Link>
+            )
+          )}
 
           {song.price > 0 && !purchased ? (
             <button className="btn btn-primary btn-sm buy-btn" onClick={onBuy}>
