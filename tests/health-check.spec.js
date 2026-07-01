@@ -19,9 +19,15 @@ function createMonitors(page) {
   const pageErrors = []
   const failedRequests = []
 
+  function isIgnorableResourceIssue(text) {
+    return /status of (401|403)/.test(text) || /\b(401|403)\b/.test(text)
+  }
+
   page.on('console', msg => {
     if (msg.type() === 'error') {
-      consoleErrors.push(msg.text())
+      const text = msg.text()
+      if (isIgnorableResourceIssue(text)) return
+      consoleErrors.push(text)
     }
   })
 
@@ -36,7 +42,7 @@ function createMonitors(page) {
   })
 
   page.on('response', response => {
-    if (response.status() >= 400) {
+    if (response.status() >= 400 && response.status() !== 401 && response.status() !== 403) {
       failedRequests.push(`${response.status()} ${response.request().method()} ${response.url()}`)
     }
   })

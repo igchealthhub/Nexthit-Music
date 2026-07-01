@@ -19,9 +19,9 @@ with check (
   exists (
     select 1
     from public.artist_profiles ap
-    join public.profiles p on p.id = ap.user_id
+    join public.profiles p on p.id = coalesce(ap.user_id, ap.id)
     where ap.id = songs.artist_id
-      and ap.user_id = auth.uid()
+      and coalesce(ap.user_id, ap.id) = auth.uid()
       and (p.role = 'artist' or p.is_admin = true)
   )
 );
@@ -36,7 +36,7 @@ using (
     select 1
     from public.artist_profiles ap
     where ap.id = songs.artist_id
-      and ap.user_id = auth.uid()
+      and coalesce(ap.user_id, ap.id) = auth.uid()
   )
 );
 
@@ -50,7 +50,7 @@ using (
     select 1
     from public.artist_profiles ap
     where ap.id = songs.artist_id
-      and ap.user_id = auth.uid()
+      and coalesce(ap.user_id, ap.id) = auth.uid()
   )
 )
 with check (
@@ -58,7 +58,7 @@ with check (
     select 1
     from public.artist_profiles ap
     where ap.id = songs.artist_id
-      and ap.user_id = auth.uid()
+      and coalesce(ap.user_id, ap.id) = auth.uid()
   )
 );
 
@@ -71,7 +71,7 @@ using (
     select 1
     from public.artist_profiles ap
     where ap.id = songs.artist_id
-      and ap.user_id = auth.uid()
+      and coalesce(ap.user_id, ap.id) = auth.uid()
   )
 );
 

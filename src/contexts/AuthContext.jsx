@@ -50,6 +50,35 @@ function normalizeProfile(profile, authUser) {
   }
 }
 
+async function ensureArtistProfile(userId, profileRow = null, authUser = null) {
+  if (!userId) return { data: null, error: null }
+
+  const payloadWithUserId = { id: userId, user_id: userId }
+  let result = await supabase
+    .from('artist_profiles')
+    .upsert(payloadWithUserId, { onConflict: 'id' })
+
+  // Legacy schemas may not have user_id yet.
+  if (result.error && /column .*user_id.* does not exist/i.test(result.error?.message || '')) {
+    result = await supabase
+      .from('artist_profiles')
+      .upsert({ id: userId }, { onConflict: 'id' })
+  }
+
+  if (result.error) {
+    const code = result.error?.code || ''
+    const message = (result.error?.message || '').toLowerCase()
+    const canIgnore = code === '42501' || message.includes('permission denied') || message.includes('row-level security')
+
+    // Do not block auth flows if artist profile bootstrap fails.
+    if (!canIgnore) {
+      console.warn('ARTIST_PROFILE_BOOTSTRAP_ERROR', { userId, error: result.error })
+    }
+  }
+
+  return result
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -148,6 +177,11 @@ export function AuthProvider({ children }) {
       }
 
       const normalized = normalizeProfile(data, currentUser)
+
+      if (normalized?.role === 'artist') {
+        await ensureArtistProfile(userId, normalized, currentUser)
+      }
+
       setProfile(normalized)
       return { data: normalized, error }
     } catch (err) {
@@ -245,6 +279,10 @@ export function AuthProvider({ children }) {
             message: profileError.message || 'Failed to save agreement tracking to profile.',
           }),
         }
+      }
+
+      if (role === 'artist') {
+        await ensureArtistProfile(authUser.id, profilePayload, authUser)
       }
 
       return signupResult

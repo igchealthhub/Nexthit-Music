@@ -28,6 +28,8 @@ import PlaylistDetailPage from './pages/PlaylistDetailPage'
 import TermsPage from './pages/TermsPage'
 import PrivacyPage from './pages/PrivacyPage'
 import ArtistAgreementPage from './pages/ArtistAgreementPage'
+import AdminContestsPage from './pages/AdminContestsPage'
+import AdminSystemToolsPage from './pages/AdminSystemToolsPage'
 
 import './App.css'
 
@@ -67,6 +69,12 @@ export default function App() {
               } />
               <Route path="/admin" element={
                 <ProtectedRoute adminOnly><AdminDashboardPage /></ProtectedRoute>
+              } />
+              <Route path="/admin/contests" element={
+                <ProtectedRoute adminOnly><AdminContestsPage /></ProtectedRoute>
+              } />
+              <Route path="/admin/system-tools" element={
+                <ProtectedRoute adminOnly><AdminSystemToolsPage /></ProtectedRoute>
               } />
               <Route path="/contests/:id" element={<ContestDetailPage />} />
               <Route path="/contest/:id" element={<ContestDetailPage />} />

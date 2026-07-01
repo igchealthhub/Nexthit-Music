@@ -3,30 +3,50 @@ import { credentialsFor, login } from './utils/auth'
 import { attachFailureMonitors, assertNoCriticalClientFailures, assertNoSupabaseFailures } from './utils/quality'
 
 test.describe('Contests', () => {
-  test('create and edit contest', async ({ page }) => {
+  test('admin manages contests and public visibility', async ({ page }) => {
     const monitors = attachFailureMonitors(page)
     const admin = credentialsFor('admin')
     test.skip(!admin.email || !admin.password, 'Set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD.')
 
     await login(page, 'admin')
-    await page.goto('/admin')
-    await page.getByRole('button', { name: /contests/i }).first().click()
-    await expect(page.getByText(/create contest/i)).toBeVisible()
+    await page.goto('/admin/contests')
+    await expect(page.getByRole('heading', { name: /contest manager/i })).toBeVisible()
 
-    const contestName = `E2E Contest ${Date.now()}`
-    await page.locator('input.input').first().fill(contestName)
-    await page.getByRole('button', { name: /^create contest$/i }).click()
+    const draftTitle = `E2E Draft Contest ${Date.now()}`
+    const activeTitle = `E2E Active Contest ${Date.now()}`
+    const updatedPrize = `Updated Prize ${Date.now()}`
 
-    await expect(page.locator('body')).toContainText(contestName)
+    // Create draft contest
+    await page.getByLabel(/title/i).fill(draftTitle)
+    await page.getByLabel(/description/i).fill('Draft contest for visibility testing')
+    await page.getByLabel(/prize/i).fill('Draft prize')
+    await page.getByLabel(/entry fee/i).fill('0')
+    await page.getByLabel(/status/i).selectOption('draft')
+    await page.getByRole('button', { name: /create contest/i }).click()
+    await expect(page.getByText(draftTitle)).toBeVisible()
 
-    const draftButton = page.getByRole('button', { name: /^draft$/i }).first()
-    if (await draftButton.count()) await draftButton.click()
+    // Create active contest
+    await page.getByLabel(/title/i).fill(activeTitle)
+    await page.getByLabel(/description/i).fill('Active contest for public visibility testing')
+    await page.getByLabel(/prize/i).fill('Active prize')
+    await page.getByLabel(/entry fee/i).fill('5')
+    await page.getByLabel(/status/i).selectOption('active')
+    await page.getByRole('button', { name: /create contest/i }).click()
+    await expect(page.getByText(activeTitle)).toBeVisible()
 
-    const activeButton = page.getByRole('button', { name: /^active$/i }).first()
-    if (await activeButton.count()) await activeButton.click()
+    // Edit existing active contest
+    const activeCard = page.locator('.card').filter({ hasText: activeTitle }).last()
+    await activeCard.getByRole('button', { name: /edit/i }).click()
+    await page.getByLabel(/prize/i).fill(updatedPrize)
+    await page.getByRole('button', { name: /update contest/i }).click()
+    await expect(page.getByText(updatedPrize)).toBeVisible()
 
     await assertNoCriticalClientFailures(page, monitors)
     assertNoSupabaseFailures(monitors)
+
+    await page.goto('/contests')
+    await expect(page.getByText(activeTitle)).toBeVisible()
+    await expect(page.getByText(draftTitle)).toHaveCount(0)
   })
 
   test('artist enter contest', async ({ page }) => {
