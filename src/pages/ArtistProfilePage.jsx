@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 export default function ArtistProfilePage() {
   const { id } = useParams()
@@ -33,7 +34,7 @@ export default function ArtistProfilePage() {
     if (!profileRes.data) { setNotFound(true); setLoading(false); return }
 
     setArtist(profileRes.data)
-    setSongs(songsRes.data || [])
+    setSongs((songsRes.data || []).map(withSongCoverUrl))
     setVideos(videosRes.data || [])
     setFollowerCount(followsRes.count || 0)
 
@@ -193,7 +194,7 @@ export default function ArtistProfilePage() {
             {songs.map(s => (
               <div key={s.id} className="media-card">
                 <div className="media-card-thumb">
-                  {s.cover_url ? <img src={s.cover_url} alt={s.title} /> : '🎵'}
+                  {getSongCoverImage(s) ? <img src={getSongCoverImage(s)} alt={s.title} /> : '🎵'}
                 </div>
                 <div className="media-card-body">
                   <div className="media-card-title">{s.title}</div>

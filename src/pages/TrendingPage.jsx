@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 export default function TrendingPage() {
   const [trending, setTrending] = useState([])
@@ -20,13 +21,13 @@ export default function TrendingPage() {
     const [playsRes, newRes, genreSongsRes] = await Promise.all([
       supabase.from('song_plays').select('song_id').gte('played_at', weekAgo).limit(2000),
       supabase.from('songs')
-        .select('id, title, cover_url, play_count, created_at, genres(name)')
+        .select('id, title, cover_url, cover_art_url, play_count, created_at, genres(name)')
         .eq('status', 'approved')
         .gte('created_at', monthAgo)
         .order('play_count', { ascending: false })
         .limit(8),
       supabase.from('songs')
-        .select('id, title, cover_url, play_count, genre_id, genres(id, name)')
+        .select('id, title, cover_url, cover_art_url, play_count, genre_id, genres(id, name)')
         .eq('status', 'approved')
         .order('play_count', { ascending: false })
         .limit(200),
@@ -44,29 +45,29 @@ export default function TrendingPage() {
 
     if (topIds.length) {
       const trendRes = await supabase.from('songs')
-        .select('id, title, cover_url, play_count, genres(name)')
+        .select('id, title, cover_url, cover_art_url, play_count, genres(name)')
         .in('id', topIds)
         .eq('status', 'approved')
       setTrending(
-        (trendRes.data || []).sort((a, b) => (pm[b.id] || 0) - (pm[a.id] || 0))
+        (trendRes.data || []).map(withSongCoverUrl).sort((a, b) => (pm[b.id] || 0) - (pm[a.id] || 0))
       )
     } else {
       // Fallback: top songs by all-time plays
       const fallback = await supabase.from('songs')
-        .select('id, title, cover_url, play_count, genres(name)')
+        .select('id, title, cover_url, cover_art_url, play_count, genres(name)')
         .eq('status', 'approved')
         .order('play_count', { ascending: false })
         .limit(10)
-      setTrending(fallback.data || [])
+      setTrending((fallback.data || []).map(withSongCoverUrl))
     }
 
-    setNewReleases(newRes.data || [])
+    setNewReleases((newRes.data || []).map(withSongCoverUrl))
 
     // Top song per genre
     const genreMap = {}
     ;(genreSongsRes.data || []).forEach(s => {
       if (s.genres && !genreMap[s.genre_id]) {
-        genreMap[s.genre_id] = { genre: s.genres, song: s }
+        genreMap[s.genre_id] = { genre: s.genres, song: withSongCoverUrl(s) }
       }
     })
     setTopByGenre(Object.values(genreMap).slice(0, 8))
@@ -114,7 +115,7 @@ export default function TrendingPage() {
                     <div key={song.id} className="leaderboard-row">
                       <div className={`lb-rank ${cls}`}>{label}</div>
                       <div style={{ width: 44, height: 44, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)', fontSize: '1.25rem', overflow: 'hidden' }}>
-                        {song.cover_url ? <img src={song.cover_url} alt={song.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                        {getSongCoverImage(song) ? <img src={getSongCoverImage(song)} alt={song.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                       </div>
                       <div className="lb-info">
                         <div className="lb-title">{song.title}</div>
@@ -147,7 +148,7 @@ export default function TrendingPage() {
                 {newReleases.map(s => (
                   <div key={s.id} className="media-card">
                     <div className="media-card-thumb">
-                      {s.cover_url ? <img src={s.cover_url} alt={s.title} /> : '🎵'}
+                      {getSongCoverImage(s) ? <img src={getSongCoverImage(s)} alt={s.title} /> : '🎵'}
                     </div>
                     <div className="media-card-body">
                       <div className="media-card-title">{s.title}</div>
@@ -179,7 +180,7 @@ export default function TrendingPage() {
                     </div>
                     <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'center' }}>
                       <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--surface-2)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.125rem' }}>
-                        {song.cover_url ? <img src={song.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                        {getSongCoverImage(song) ? <img src={getSongCoverImage(song)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 600, color: 'var(--text-h)', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{song.title}</div>

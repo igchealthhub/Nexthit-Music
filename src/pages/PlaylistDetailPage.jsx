@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 export default function PlaylistDetailPage() {
   const { id } = useParams()
@@ -40,11 +41,11 @@ export default function PlaylistDetailPage() {
 
     const songsRes = await supabase
       .from('playlist_songs')
-      .select('id, position, song_id, songs(id, title, cover_url, play_count, price, genres(name))')
+      .select('id, position, song_id, songs(id, title, cover_url, cover_art_url, play_count, price, genres(name))')
       .eq('playlist_id', id)
       .order('position')
 
-    setSongs(songsRes.data || [])
+    setSongs((songsRes.data || []).map(row => ({ ...row, songs: withSongCoverUrl(row.songs) })))
     setLoading(false)
   }
 
@@ -74,12 +75,12 @@ export default function PlaylistDetailPage() {
     if (!q.trim()) { setSearchResults([]); return }
     setSearching(true)
     const { data } = await supabase.from('songs')
-      .select('id, title, cover_url, genres(name)')
+      .select('id, title, cover_url, cover_art_url, genres(name)')
       .eq('status', 'approved')
       .ilike('title', `%${q}%`)
       .limit(10)
     const existing = new Set(songs.map(s => s.song_id))
-    setSearchResults((data || []).filter(s => !existing.has(s.id)))
+    setSearchResults((data || []).map(withSongCoverUrl).filter(s => !existing.has(s.id)))
     setSearching(false)
   }
 
@@ -89,10 +90,10 @@ export default function PlaylistDetailPage() {
     const maxPos = songs.length ? Math.max(...songs.map(s => s.position || 0)) : 0
     const { data, error } = await supabase.from('playlist_songs')
       .insert({ playlist_id: id, song_id: song.id, position: maxPos + 1 })
-      .select('id, position, song_id, songs(id, title, cover_url, play_count, price, genres(name))')
+      .select('id, position, song_id, songs(id, title, cover_url, cover_art_url, play_count, price, genres(name))')
       .single()
     if (error) { alert(error.message); setAdding(null); return }
-    setSongs(prev => [...prev, data])
+    setSongs(prev => [...prev, { ...data, songs: withSongCoverUrl(data.songs) }])
     setSearchResults(prev => prev.filter(s => s.id !== song.id))
     setAdding(null)
   }
@@ -184,7 +185,7 @@ export default function PlaylistDetailPage() {
               {searchResults.map(s => (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0.625rem', background: 'var(--surface-2)', borderRadius: 8 }}>
                   <div style={{ width: 36, height: 36, borderRadius: 6, background: 'var(--surface-3)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    {s.cover_url ? <img src={s.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                    {getSongCoverImage(s) ? <img src={getSongCoverImage(s)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 500, color: 'var(--text-h)', fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</div>
@@ -225,7 +226,7 @@ export default function PlaylistDetailPage() {
               <div key={ps.id} style={{ display: 'flex', alignItems: 'center', gap: '0.875rem', padding: '0.75rem 1rem', borderBottom: i < songs.length - 1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ width: 22, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem', flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--surface-2)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', flexShrink: 0 }}>
-                  {s.cover_url ? <img src={s.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                  {getSongCoverImage(s) ? <img src={getSongCoverImage(s)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, color: 'var(--text-h)', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</div>

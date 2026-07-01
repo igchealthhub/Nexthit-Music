@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 export default function LeaderboardPage() {
   const { user } = useAuth()
@@ -29,7 +30,7 @@ export default function LeaderboardPage() {
     const [playsRes, likesRes, contestRes] = await Promise.all([
       supabase
         .from('songs')
-        .select('id, title, cover_url, play_count, genres(name)')
+        .select('id, title, cover_url, cover_art_url, play_count, genres(name)')
         .eq('status', 'approved')
         .order('play_count', { ascending: false })
         .limit(20),
@@ -49,12 +50,12 @@ export default function LeaderboardPage() {
         .maybeSingle(),
     ])
 
-    setSongsByPlays(playsRes.data || [])
+    setSongsByPlays((playsRes.data || []).map(withSongCoverUrl))
 
     // Build likes count map and sort
     const likeCounts = {}
     ;(likesRes.data || []).forEach(l => { likeCounts[l.song_id] = (likeCounts[l.song_id] || 0) + 1 })
-    const songsWithLikes = (playsRes.data || [])
+    const songsWithLikes = (playsRes.data || []).map(withSongCoverUrl)
       .map(s => ({ ...s, likeCount: likeCounts[s.id] || 0 }))
       .sort((a, b) => b.likeCount - a.likeCount)
     setSongsByLikes(songsWithLikes)
@@ -63,9 +64,9 @@ export default function LeaderboardPage() {
       setActiveContest(contestRes.data)
       const entriesRes = await supabase
         .from('contest_entries')
-        .select('id, song_id, songs(id, title, cover_url, play_count, genres(name)), contest_votes(id)')
+        .select('id, song_id, songs(id, title, cover_url, cover_art_url, play_count, genres(name)), contest_votes(id)')
         .eq('contest_id', contestRes.data.id)
-      const sorted = (entriesRes.data || []).sort((a, b) => (b.contest_votes?.length || 0) - (a.contest_votes?.length || 0))
+      const sorted = (entriesRes.data || []).map(entry => ({ ...entry, songs: withSongCoverUrl(entry.songs) })).sort((a, b) => (b.contest_votes?.length || 0) - (a.contest_votes?.length || 0))
       setContestEntries(sorted)
     }
 
@@ -130,7 +131,7 @@ export default function LeaderboardPage() {
                     <div key={song.id} className="leaderboard-row">
                       <div className={`lb-rank ${cls}`}>{label}</div>
                       <div style={{ width: 44, height: 44, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)', fontSize: '1.25rem', overflow: 'hidden' }}>
-                        {song.cover_url ? <img src={song.cover_url} alt={song.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                        {getSongCoverImage(song) ? <img src={getSongCoverImage(song)} alt={song.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                       </div>
                       <div className="lb-info">
                         <div className="lb-title">{song.title}</div>
@@ -160,7 +161,7 @@ export default function LeaderboardPage() {
                     <div key={song.id} className="leaderboard-row">
                       <div className={`lb-rank ${cls}`}>{label}</div>
                       <div style={{ width: 44, height: 44, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)', fontSize: '1.25rem', overflow: 'hidden' }}>
-                        {song.cover_url ? <img src={song.cover_url} alt={song.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                        {getSongCoverImage(song) ? <img src={getSongCoverImage(song)} alt={song.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                       </div>
                       <div className="lb-info">
                         <div className="lb-title">{song.title}</div>
@@ -207,7 +208,7 @@ export default function LeaderboardPage() {
                         <div key={entry.id} className="leaderboard-row">
                           <div className={`lb-rank ${cls}`}>{label}</div>
                           <div style={{ width: 44, height: 44, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)', fontSize: '1.25rem', overflow: 'hidden' }}>
-                            {song?.cover_url ? <img src={song.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
+                            {getSongCoverImage(song) ? <img src={getSongCoverImage(song)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🎵'}
                           </div>
                           <div className="lb-info">
                             <div className="lb-title">{song?.title || 'Unknown Song'}</div>

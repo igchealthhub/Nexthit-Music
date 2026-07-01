@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 const STATUS_STYLE = {
   pending:  { badge: 'badge-pending', label: '⏳ Pending' },
@@ -23,8 +24,88 @@ export default function ArtistDashboardPage() {
   const [songPurchases, setSongPurchases] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('songs')
+  const [stripeStatus, setStripeStatus] = useState({
+    connected: false,
+    onboardingComplete: false,
+    chargesEnabled: false,
+    payoutsEnabled: false,
+  })
+  const [stripeLoading, setStripeLoading] = useState(true)
+  const [stripeBusy, setStripeBusy] = useState(false)
+  const [stripeError, setStripeError] = useState('')
+  const [stripeNotice, setStripeNotice] = useState('')
 
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Artist'
+
+  async function authedApi(path, options = {}) {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) throw new Error('You must be logged in to continue.')
+
+    const response = await fetch(path, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    })
+
+    const text = await response.text()
+    let payload = null
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      payload = null
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.error || text || 'Request failed.')
+    }
+
+    return payload || {}
+  }
+
+  async function refreshStripeStatus() {
+    try {
+      setStripeLoading(true)
+      setStripeError('')
+      const status = await authedApi('/api/stripe/account-status', { method: 'GET' })
+      setStripeStatus({
+        connected: status.connected === true,
+        onboardingComplete: status.onboardingComplete === true,
+        chargesEnabled: status.chargesEnabled === true,
+        payoutsEnabled: status.payoutsEnabled === true,
+      })
+    } catch (error) {
+      setStripeError(error.message)
+    } finally {
+      setStripeLoading(false)
+    }
+  }
+
+  async function connectStripe() {
+    try {
+      setStripeBusy(true)
+      setStripeError('')
+
+      await authedApi('/api/stripe/create-connect-account', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+
+      const link = await authedApi('/api/stripe/create-account-link', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+
+      if (!link?.url) throw new Error('Stripe onboarding link was not returned.')
+      window.location.assign(link.url)
+    } catch (error) {
+      setStripeError(error.message)
+      setStripeBusy(false)
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -34,7 +115,7 @@ export default function ArtistDashboardPage() {
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('artist_id', user.id),
       ])
 
-      const songData = s.data || []
+      const songData = (s.data || []).map(withSongCoverUrl)
       setSongs(songData)
       setVideos(v.data || [])
       setFollowerCount(followsRes.count || 0)
@@ -89,6 +170,22 @@ export default function ArtistDashboardPage() {
     load()
   }, [user.id])
 
+  useEffect(() => {
+    refreshStripeStatus()
+  }, [user.id])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const stripe = params.get('stripe')
+    if (stripe === 'return') {
+      setStripeNotice('Returned from Stripe. Refreshing status...')
+      refreshStripeStatus()
+    }
+    if (stripe === 'refresh') {
+      setStripeNotice('Stripe setup is incomplete. Continue setup to receive payouts.')
+    }
+  }, [])
+
   async function deleteSong(id) {
     if (!confirm('Delete this song? This cannot be undone.')) return
     const { error } = await supabase.from('songs').delete().eq('id', id)
@@ -123,6 +220,24 @@ export default function ArtistDashboardPage() {
     return acc
   }, []).sort((a, b) => b.revenue - a.revenue)
 
+  const stripeStatusLabel = !stripeStatus.connected
+    ? 'Not connected'
+    : stripeStatus.payoutsEnabled
+      ? 'Payouts enabled'
+      : stripeStatus.onboardingComplete
+        ? 'Connected'
+        : 'Setup incomplete'
+
+  const stripeStatusMessage = !stripeStatus.connected
+    ? 'Finish setup to receive payouts.'
+    : stripeStatus.payoutsEnabled
+      ? 'Stripe payouts are enabled.'
+      : stripeStatus.onboardingComplete
+        ? 'Stripe is connected.'
+        : 'Finish setup to receive payouts.'
+
+  const stripeActionLabel = !stripeStatus.connected ? 'Connect Stripe' : 'Continue Stripe Setup'
+
   return (
     <div className="page">
       {/* Header */}
@@ -138,6 +253,53 @@ export default function ArtistDashboardPage() {
           <Link to="/upload/song" className="btn btn-primary btn-sm">+ Upload Song</Link>
           <Link to="/upload/video" className="btn btn-outline btn-sm">+ Upload Video</Link>
           <Link to="/contests" className="btn btn-outline btn-sm">🏆 Contests</Link>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ marginBottom: '0.4rem' }}>💳 Get Paid with Stripe</h3>
+            {stripeLoading ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Checking Stripe account status...</p>
+            ) : (
+              <>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}><strong>Status:</strong> {stripeStatusLabel}</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{stripeStatusMessage}</p>
+              </>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span className={`badge ${stripeStatus.connected ? 'badge-active' : 'badge-pending'}`}>{stripeStatusLabel}</span>
+            <span className={`badge ${stripeStatus.chargesEnabled ? 'badge-active' : 'badge-pending'}`}>
+              {stripeStatus.chargesEnabled ? 'Charges On' : 'Charges Pending'}
+            </span>
+            <span className={`badge ${stripeStatus.payoutsEnabled ? 'badge-active' : 'badge-pending'}`}>
+              {stripeStatus.payoutsEnabled ? 'Payouts On' : 'Payouts Pending'}
+            </span>
+          </div>
+        </div>
+
+        {stripeNotice && (
+          <div className="alert alert-info" style={{ marginTop: '1rem' }}>
+            {stripeNotice}
+          </div>
+        )}
+
+        {stripeError && (
+          <div className="alert alert-error" style={{ marginTop: '1rem' }}>
+            Stripe error: {stripeError}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+          <button className="btn btn-primary btn-sm" onClick={connectStripe} disabled={stripeBusy}>
+            {stripeBusy ? 'Opening Stripe...' : stripeActionLabel}
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={refreshStripeStatus} disabled={stripeLoading}>
+            Refresh Status
+          </button>
         </div>
       </div>
 
@@ -223,8 +385,8 @@ export default function ArtistDashboardPage() {
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
                                 <div style={{ width: 36, height: 36, borderRadius: 6, background: 'var(--surface-2)', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  {s.cover_url
-                                    ? <img src={s.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  {getSongCoverImage(s)
+                                    ? <img src={getSongCoverImage(s)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     : '🎵'}
                                 </div>
                                 <div>
@@ -331,7 +493,9 @@ export default function ArtistDashboardPage() {
               <div className="card">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <h3>💰 Sales & Earnings</h3>
-                  <span className="badge badge-pending" style={{ fontSize: '0.75rem' }}>Stripe Payouts Coming Soon</span>
+                  <span className={`badge ${stripeStatus.payoutsEnabled ? 'badge-active' : 'badge-pending'}`} style={{ fontSize: '0.75rem' }}>
+                    {stripeStatus.payoutsEnabled ? 'Stripe Payouts Enabled' : 'Stripe Payouts Pending'}
+                  </span>
                 </div>
                 <div className="stats-row" style={{ marginBottom: '1.25rem' }}>
                   <div className="stat-card">
@@ -361,7 +525,7 @@ export default function ArtistDashboardPage() {
                   </div>
                 )}
                 <div style={{ padding: '0.75rem 1rem', background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                  💳 Stripe Connect payouts are coming soon. Your earnings are being tracked and will be paid out when the system launches.
+                  💳 Gross sales are tracked here. Stripe fees and platform splits are saved at checkout and applied during payout processing.
                 </div>
               </div>
 

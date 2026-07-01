@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 const STATUS_COLORS = {
   draft: 'badge-fan',
@@ -78,7 +79,7 @@ export default function ContestDetailPage() {
       supabase.from('contests').select('*').eq('id', id).maybeSingle(),
       supabase
         .from('contest_entries')
-        .select('id, contest_id, song_id, artist_id, created_at, songs(id, title, cover_url, audio_url, play_count, genres(name)), contest_votes(id, user_id)')
+        .select('id, contest_id, song_id, artist_id, created_at, songs(id, title, cover_url, cover_art_url, audio_url, play_count, genres(name)), contest_votes(id, user_id)')
         .eq('contest_id', id),
     ])
 
@@ -101,13 +102,14 @@ export default function ContestDetailPage() {
       setEntries([])
     } else {
       const withPlayable = await Promise.all((entriesRes.data || []).map(async entry => {
-        const playableCover = await resolveStorageUrl(entry.songs?.cover_url, 'cover-art')
-        const playableAudio = await resolveStorageUrl(entry.songs?.audio_url, 'song-files')
+        const song = withSongCoverUrl(entry.songs)
+        const playableCover = await resolveStorageUrl(getSongCoverImage(song), 'cover-art')
+        const playableAudio = await resolveStorageUrl(song?.audio_url, 'song-files')
         return {
           ...entry,
-          songs: entry.songs
-            ? { ...entry.songs, playable_cover_url: playableCover, playable_audio_url: playableAudio }
-            : entry.songs,
+          songs: song
+            ? { ...song, playable_cover_url: playableCover, playable_audio_url: playableAudio }
+            : song,
         }
       }))
 

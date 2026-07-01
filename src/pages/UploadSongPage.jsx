@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage } from '../lib/songCovers'
 
 const FALLBACK_GENRES = [
   'Pop', 'Hip-Hop', 'R&B', 'Rock', 'Electronic', 'Jazz',
@@ -154,7 +155,8 @@ export default function UploadSongPage() {
     console.log('[UploadSong] artist_profiles.user_id', user?.id || null)
     console.log('[UploadSong] full insert payload', JSON.stringify(attempt, null, 2))
     // Direct insert path avoids RPC signature drift across environments.
-    const directPayloadCoverArt = {
+    const coverImage = getSongCoverImage(attempt)
+    const directPayload = {
       artist_id: attempt.artist_id,
       title: attempt.title,
       description: attempt.description,
@@ -162,44 +164,21 @@ export default function UploadSongPage() {
       price: attempt.price,
       status: 'pending',
       audio_url: attempt.audio_url,
-      cover_art_url: attempt.cover_url,
+      cover_url: coverImage,
       created_at: new Date().toISOString(),
     }
 
     let data = null
     let error = null
 
-    const coverArtInsert = await supabase
+    const directInsert = await supabase
       .from('songs')
-      .insert([directPayloadCoverArt])
+      .insert([directPayload])
       .select('id, title, status')
       .single()
 
-    data = coverArtInsert.data
-    error = coverArtInsert.error
-
-    if (error && /column .*cover_art_url.* does not exist/i.test(error.message || '')) {
-      const directPayloadCover = {
-        artist_id: attempt.artist_id,
-        title: attempt.title,
-        description: attempt.description,
-        genre_id: attempt.genre_id,
-        price: attempt.price,
-        status: 'pending',
-        audio_url: attempt.audio_url,
-        cover_url: attempt.cover_url,
-        created_at: new Date().toISOString(),
-      }
-
-      const legacyCoverInsert = await supabase
-        .from('songs')
-        .insert([directPayloadCover])
-        .select('id, title, status')
-        .single()
-
-      data = legacyCoverInsert.data
-      error = legacyCoverInsert.error
-    }
+    data = directInsert.data
+    error = directInsert.error
 
     console.log('[UploadSong] songs direct insert result:', { data, error })
     console.log('[UploadSong] songs insert response data', data)

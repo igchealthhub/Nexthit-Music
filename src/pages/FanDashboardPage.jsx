@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getSongCoverImage, withSongCoverUrl } from '../lib/songCovers'
 
 const NOTIF_ICONS = {
   song_approved: '✅', song_rejected: '❌', song_purchased: '💰',
@@ -31,22 +32,22 @@ export default function FanDashboardPage() {
     async function load() {
       const [likesRes, playsRes, recommendedRes, purchasesRes, notifRes] = await Promise.all([
         supabase.from('likes')
-          .select('song_id, songs(id, title, cover_url, play_count)')
+          .select('song_id, songs(id, title, cover_url, cover_art_url, play_count)')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(8),
         supabase.from('song_plays')
-          .select('song_id, played_at, songs(id, title, cover_url)')
+          .select('song_id, played_at, songs(id, title, cover_url, cover_art_url)')
           .eq('user_id', user.id)
           .order('played_at', { ascending: false })
           .limit(6),
         supabase.from('songs')
-          .select('id, title, cover_url, play_count')
+          .select('id, title, cover_url, cover_art_url, play_count')
           .eq('status', 'approved')
           .order('play_count', { ascending: false })
           .limit(8),
         supabase.from('purchases')
-          .select('song_id, created_at, songs(id, title, cover_url, play_count)')
+          .select('song_id, created_at, songs(id, title, cover_url, cover_art_url, play_count)')
           .eq('buyer_id', user.id)
           .order('created_at', { ascending: false })
           .limit(8),
@@ -58,10 +59,10 @@ export default function FanDashboardPage() {
           .limit(5),
       ])
 
-      setLikedSongs(likesRes.data?.map(l => l.songs).filter(Boolean) || [])
-      setRecentPlays(playsRes.data?.filter(p => p.songs) || [])
-      setRecommended(recommendedRes.data || [])
-      if (!purchasesRes.error) setPurchases(purchasesRes.data || [])
+      setLikedSongs(likesRes.data?.map(l => withSongCoverUrl(l.songs)).filter(Boolean) || [])
+      setRecentPlays(playsRes.data?.map(p => ({ ...p, songs: withSongCoverUrl(p.songs) })).filter(p => p.songs) || [])
+      setRecommended((recommendedRes.data || []).map(withSongCoverUrl))
+      if (!purchasesRes.error) setPurchases((purchasesRes.data || []).map(p => ({ ...p, songs: withSongCoverUrl(p.songs) })))
       if (!notifRes.error) setNotifications(notifRes.data || [])
 
       // Follows — two-step to avoid ambiguous FK
@@ -224,7 +225,7 @@ export default function FanDashboardPage() {
             {recentPlays.map((p, i) => (
               <div key={i} className="list-row">
                 <div className="list-thumb">
-                  {p.songs.cover_url ? <img src={p.songs.cover_url} alt="" /> : '🎵'}
+                  {getSongCoverImage(p.songs) ? <img src={getSongCoverImage(p.songs)} alt="" /> : '🎵'}
                 </div>
                 <div className="list-info">
                   <div className="list-title">{p.songs.title}</div>
@@ -382,10 +383,11 @@ function CreatePlaylistModal({ open, onClose, onSubmit, name, setName, isPublic,
 }
 
 function SongCard({ song }) {
+  const coverImage = getSongCoverImage(song)
   return (
     <div className="media-card">
       <div className="media-card-thumb">
-        {song.cover_url ? <img src={song.cover_url} alt={song.title} /> : '🎵'}
+        {coverImage ? <img src={coverImage} alt={song.title} /> : '🎵'}
       </div>
       <div className="media-card-body">
         <div className="media-card-title">{song.title}</div>
