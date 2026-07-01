@@ -52,7 +52,7 @@ function formatMoney(value) {
 }
 
 export default function AdminContestsPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const [contests, setContests] = useState([])
   const [loading, setLoading] = useState(true)
@@ -60,6 +60,7 @@ export default function AdminContestsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [schemaHint, setSchemaHint] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
@@ -73,16 +74,54 @@ export default function AdminContestsPage() {
     setSchemaHint('')
 
     try {
+      console.log('ADMIN CONTESTS user id', user?.id || null)
+      console.log('ADMIN CONTESTS profile', profile || null)
+
+      if (!user?.id) {
+        setIsAdmin(false)
+        setError('You must be logged in to manage contests.')
+        setContests([])
+        return
+      }
+
+      const { data: adminProfile, error: adminProfileError } = await supabase
+        .from('profiles')
+        .select('id, is_admin')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      const resolvedIsAdmin = Boolean(adminProfile?.is_admin === true || profile?.is_admin === true)
+      console.log('ADMIN CONTESTS is_admin', resolvedIsAdmin)
+
+      if (adminProfileError) {
+        setIsAdmin(false)
+        setError(`Could not verify admin profile: ${adminProfileError.message}`)
+        setContests([])
+        return
+      }
+
+      setIsAdmin(resolvedIsAdmin)
+
+      if (!resolvedIsAdmin) {
+        setError('Admin access required. profiles.is_admin must be true.')
+        setContests([])
+        return
+      }
+
       const { data, error: fetchError } = await supabase
         .from('contests')
         .select('*')
         .order('created_at', { ascending: false })
 
+      console.log('ADMIN CONTESTS contests query result', data || [])
+      console.log('ADMIN CONTESTS contests query error', fetchError || null)
+
       if (fetchError) {
         throw fetchError
       }
 
-      setContests((data || []).map(normalizeContestRow))
+      const normalizedContests = Array.isArray(data) ? data.map(normalizeContestRow) : []
+      setContests(normalizedContests)
     } catch (fetchError) {
       console.error('ADMIN CONTEST LOAD ERROR', fetchError)
       setError(`Could not load contests: ${fetchError.message}`)
@@ -105,6 +144,9 @@ export default function AdminContestsPage() {
       setError(`Could not verify admin profile: ${profileError.message}`)
       return false
     }
+
+    console.log('ADMIN CONTESTS profile', data || null)
+    console.log('ADMIN CONTESTS is_admin', data?.is_admin === true)
 
     return data?.is_admin === true
   }
@@ -269,8 +311,8 @@ export default function AdminContestsPage() {
     <div className="page">
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
         <div>
-          <h1>🏆 Contest Manager</h1>
-          <p>Create, edit, and publish contests from inside the app</p>
+          <h1>🏆 Manage Contests</h1>
+          <p>Create, edit, and publish contests from inside the app.</p>
         </div>
         <Link to="/admin" className="btn btn-outline btn-sm">← Back to Admin</Link>
       </div>
@@ -278,109 +320,114 @@ export default function AdminContestsPage() {
       {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
       {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
       {schemaHint && <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>{schemaHint}</div>}
+      {!isAdmin && !loading && (
+        <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+          This page only allows admins to create or edit contests.
+        </div>
+      )}
 
-      <div className="grid-2">
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <h3>{editingId ? 'Edit Contest' : 'Create Contest'}</h3>
-            {editingId && (
-              <button className="btn btn-ghost btn-sm" onClick={startCreate}>New Contest</button>
-            )}
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+          <h3>{editingId ? 'Edit Contest' : 'Create Contest'}</h3>
+          {editingId && (
+            <button className="btn btn-ghost btn-sm" onClick={startCreate}>New Contest</button>
+          )}
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label>Title *</label>
+            <input className="input" value={form.title} onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))} />
           </div>
+          <div className="form-group">
+            <label>Description</label>
+            <textarea className="input" value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} />
+          </div>
+          <div className="form-group">
+            <label>Prize Amount</label>
+            <input className="input" type="number" min="0" step="0.01" value={form.prize_amount} onChange={e => setForm(prev => ({ ...prev, prize_amount: e.target.value }))} />
+          </div>
+          <div className="grid-2" style={{ gap: '0.75rem' }}>
+            <div className="form-group">
+              <label>Start Date</label>
+              <input className="input" type="datetime-local" value={form.start_date} onChange={e => setForm(prev => ({ ...prev, start_date: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label>End Date</label>
+              <input className="input" type="datetime-local" value={form.end_date} onChange={e => setForm(prev => ({ ...prev, end_date: e.target.value }))} />
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Cover Image URL</label>
+            <input className="input" type="url" placeholder="https://..." value={form.cover_url} onChange={e => setForm(prev => ({ ...prev, cover_url: e.target.value }))} />
+          </div>
+          <div className="form-group">
+            <label>Status</label>
+            <select className="input" value={form.status} onChange={e => setForm(prev => ({ ...prev, status: e.target.value }))}>
+              {STATUS_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <button className="btn btn-primary btn-block" type="submit" disabled={saving || !isAdmin}>
+            {saving ? 'Saving…' : editingId ? 'Update Contest' : 'Create Contest'}
+          </button>
+        </form>
 
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>Title *</label>
-              <input className="input" value={form.title} onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label>Description</label>
-              <textarea className="input" value={form.description} onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label>Prize Amount</label>
-              <input className="input" type="number" min="0" step="0.01" value={form.prize_amount} onChange={e => setForm(prev => ({ ...prev, prize_amount: e.target.value }))} />
-            </div>
-            <div className="grid-2" style={{ gap: '0.75rem' }}>
-              <div className="form-group">
-                <label>Start Date</label>
-                <input className="input" type="datetime-local" value={form.start_date} onChange={e => setForm(prev => ({ ...prev, start_date: e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label>End Date</label>
-                <input className="input" type="datetime-local" value={form.end_date} onChange={e => setForm(prev => ({ ...prev, end_date: e.target.value }))} />
-              </div>
-            </div>
-            <div className="form-group">
-              <label>Cover Image URL</label>
-              <input className="input" type="url" placeholder="https://..." value={form.cover_url} onChange={e => setForm(prev => ({ ...prev, cover_url: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label>Status</label>
-              <select className="input" value={form.status} onChange={e => setForm(prev => ({ ...prev, status: e.target.value }))}>
-                {STATUS_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </div>
-            <button className="btn btn-primary btn-block" type="submit" disabled={saving}>
-              {saving ? 'Saving…' : editingId ? 'Update Contest' : 'Create Contest'}
-            </button>
-          </form>
+        {currentContest && (
+          <div className="alert alert-info" style={{ marginTop: '1rem' }}>
+            Editing <strong>{currentContest.title}</strong>
+          </div>
+        )}
+      </div>
 
-          {currentContest && (
-            <div className="alert alert-info" style={{ marginTop: '1rem' }}>
-              Editing <strong>{currentContest.title}</strong>
-            </div>
-          )}
-        </div>
-
-        <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>Existing Contests</h3>
-          {loading ? (
-            <div className="loading-screen" style={{ minHeight: 220 }}><div className="spinner" /></div>
-          ) : contests.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">🏆</div>
-              <h3>No contests yet</h3>
-              <p>Create your first contest to get started.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {contests.map(contest => (
-                <div key={contest.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-                      <div style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--surface-2)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1.25rem' }}>
-                        {contest.cover_url ? <img src={contest.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🏆'}
-                      </div>
-                      <div>
-                      <div style={{ fontWeight: 700, color: 'var(--text-h)' }}>{contest.title}</div>
-                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>{contest.description || 'No description'}</div>
-                      </div>
+      <div className="card">
+        <h3 style={{ marginBottom: '1rem' }}>Existing Contests</h3>
+        {loading ? (
+          <div className="loading-screen" style={{ minHeight: 220 }}>
+            <div className="spinner" />
+          </div>
+        ) : contests.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">🏆</div>
+            <h3>No contests yet</h3>
+            <p>Create your first contest to get started.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.75rem' }}>
+            {contests.map(contest => (
+              <div key={contest.id || contest.title} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '0.9rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                    <div style={{ width: 56, height: 56, borderRadius: 10, background: 'var(--surface-2)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1.25rem' }}>
+                      {contest.cover_url ? <img src={contest.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🏆'}
                     </div>
-                    <span className={`badge ${contest.status === 'active' ? 'badge-active' : contest.status === 'completed' ? 'badge-fan' : 'badge-pending'}`}>
-                      {contest.status}
-                    </span>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-h)' }}>{contest.title || 'Untitled Contest'}</div>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>{contest.description || 'No description'}</div>
+                    </div>
                   </div>
-
-                  <div style={{ display: 'grid', gap: '0.25rem', marginTop: '0.75rem', fontSize: '0.875rem', color: 'var(--text)' }}>
-                    <div><strong>Prize Amount:</strong> {formatMoney(contest.prize_amount)}</div>
-                    <div><strong>Start:</strong> {contest.start_date ? new Date(contest.start_date).toLocaleString() : '—'}</div>
-                    <div><strong>End:</strong> {contest.end_date ? new Date(contest.end_date).toLocaleString() : '—'}</div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
-                    <button className="btn btn-sm btn-outline" onClick={() => startEdit(contest)}>Edit</button>
-                    {STATUS_OPTIONS.map(option => (
-                      <button key={option} className="btn btn-sm btn-ghost" disabled={contest.status === option} onClick={() => updateStatus(contest.id, option)}>
-                        {option}
-                      </button>
-                    ))}
-                  </div>
+                  <span className={`badge ${contest.status === 'active' ? 'badge-active' : contest.status === 'completed' ? 'badge-fan' : 'badge-pending'}`}>
+                    {contest.status}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+
+                <div style={{ display: 'grid', gap: '0.25rem', marginTop: '0.75rem', fontSize: '0.875rem', color: 'var(--text)' }}>
+                  <div><strong>Prize Amount:</strong> {formatMoney(contest.prize_amount)}</div>
+                  <div><strong>Start:</strong> {contest.start_date ? new Date(contest.start_date).toLocaleString() : '—'}</div>
+                  <div><strong>End:</strong> {contest.end_date ? new Date(contest.end_date).toLocaleString() : '—'}</div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
+                  <button className="btn btn-sm btn-outline" onClick={() => startEdit(contest)}>Edit</button>
+                  {STATUS_OPTIONS.map(option => (
+                    <button key={option} className="btn btn-sm btn-ghost" disabled={contest.status === option} onClick={() => updateStatus(contest.id, option)}>
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
