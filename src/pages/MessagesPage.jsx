@@ -254,18 +254,6 @@ export default function MessagesPage() {
       setThread(prev => [...prev, insertRes.data])
       buildConversations(updated, profiles)
       setNewMsg('')
-
-      const notificationRes = await supabase.from('notifications').insert({
-        user_id: selectedUserId,
-        type: 'message',
-        title: 'New message',
-        body: newMsg.trim().slice(0, 140),
-        link: '/messages',
-        read: false,
-      })
-      if (notificationRes.error) {
-        console.warn('MESSAGE NOTIFICATION INSERT ERROR', { currentUserId: user.id, error: notificationRes.error })
-      }
     } else {
       setSendError(insertRes.error?.message || 'Message failed to send. Please try again.')
     }

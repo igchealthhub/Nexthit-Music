@@ -205,6 +205,43 @@ after insert on public.messages
 for each row
 execute function public.bump_conversation_updated_at();
 
+create or replace function public.create_message_notification()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  begin
+    insert into public.notifications (user_id, type, title, body, link, read)
+    values (
+      new.recipient_id,
+      'message',
+      'New message',
+      left(coalesce(new.body, ''), 140),
+      '/messages',
+      false
+    );
+  exception
+    when undefined_table then
+      null;
+    when undefined_column then
+      null;
+    when others then
+      -- Keep message creation successful even if notification insert fails.
+      null;
+  end;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_messages_notify_recipient on public.messages;
+create trigger trg_messages_notify_recipient
+after insert on public.messages
+for each row
+execute function public.create_message_notification();
+
 create or replace function public.admin_recent_messages(p_limit integer default 100)
 returns table (
   id uuid,
